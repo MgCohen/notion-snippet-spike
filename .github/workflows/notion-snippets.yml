@@ -1,9 +1,26 @@
 name: Sync snippets to Notion
 
 on:
+  # A merge to main writes the blocks that changed.
   push:
     branches: [main]
+  # A pull request lists the blocks that the merge will change. It writes nothing.
+  pull_request:
+  # Nightly: rows added in Notion get their code, and errors show again.
+  schedule:
+    - cron: "17 3 * * *"
+  # Manual run from the Actions tab or with `gh workflow run`.
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan, apply or force"
+        default: apply
+        type: choice
+        options: [plan, apply, force]
+
+concurrency:
+  group: notion-snippets-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -12,10 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # "ref" targets read older commits
+          fetch-depth: 0 # "@<commit>" selectors read older commits
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/sync-snippets.mjs
+      - name: Sync
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode || 'apply' }}
+        run: node scripts/sync-snippets.mjs --$MODE

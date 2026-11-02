@@ -1,15 +1,4 @@
 {
   "repo": "MgCohen/notion-snippet-spike",
-  "targets": [
-    { "snippet": "create-order", "page": "40c91e245786816d8f59f6947a354c3d" },
-    { "snippet": "create-order", "page": "40c91e245786816d8f59f6947a354c3d", "codeBlockIndex": 1, "lineNumbers": true, "updateProperties": false },
-    { "snippet": "order-total", "page": "40c91e245786810bb058d0d7fcb446da" },
-    { "snippet": "find-order", "page": "40c91e245786819e805dd96f2b6376a3" },
-
-    { "name": "range-create-order", "file": "src/OrderService.cs", "lines": "16-27", "page": "40c91e24578681578c1ec390c49eff45" },
-    { "name": "range-pinned", "file": "src/OrderService.cs", "lines": "16-27", "ref": "f60adb74d44a553f687857061e601944447467f0", "page": "40c91e2457868131beb0e07234c99eb1" },
-    { "name": "whole-file", "file": "src/OrderService.cs", "page": "40c91e24578681e7acdfe9541b0c156c" },
-    { "name": "symbol-total", "file": "src/OrderService.cs", "symbol": "OrderService.Total", "page": "40c91e245786813189f0da6d8bee503e" },
-    { "name": "symbol-class-max-lines", "file": "src/OrderService.cs", "symbol": "OrderService", "maxLines": 12, "lineNumbers": true, "page": "40c91e2457868137997cfc4109f54146" }
-  ]
+  "database": "c0cf6d2ea20446d4a4cb7f1133b44535"
 }
