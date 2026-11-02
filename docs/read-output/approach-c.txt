@@ -1,0 +1,11 @@
+[paragraph] An HTML block made from a file upload. The HTML has the real line numbers 11-49, a height limit of 300 px with scroll, a ... (160 chars)
+[embed] caption="OrderService class, L11-L49"
+  url: https://prod-files-secure.s3.us-west-2.amazonaws.com/e3891e24-5786-814f-a5aa-0003b3ea24df/3eb180a9-7096-423b-92c5-75135bd5adf1/order-service.html?X-Amz-Algorith ... (1691 chars)
+  file content (code part, HTML entities decoded):
+  |     public Order Create(string customer, IEnumerable<OrderLine> lines)
+  |     {
+  |         var list = lines.ToList();
+  |         if (list.Count == 0)
+  |             throw new ArgumentException("An order needs at least one line.");
+  |         if (list.Any(l => l.Quantity <= 0))
+  |             throw new ArgumentExcepti ... (470 chars)

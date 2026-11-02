@@ -1,21 +1,46 @@
 # Live GitHub code in Notion: spike
 
-Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a merge to `main` updates the Notion blocks in about 20 seconds, with no manual step and no agent. A Notion database is the registry of all code blocks, so each run knows which blocks changed. With a public repo, Approach A (emgithub embed) also refreshes with no step, but its line range does not follow the code, and Notion search and the Notion MCP cannot read it.
+Three approaches show live GitHub code in Notion. **B** (native code block) is the only one that Notion search, the Notion MCP and the Notion API read as code. **C** (HTML block) looks best: real line numbers, scroll and colors. **A** (emgithub embed) works with no setup, but only for a public repo, and its line range does not follow the code.
 
-**Recommendation:** use Approach B for documentation in Notion. If the repo is public, an emgithub embed is acceptable for a whole-file view with scroll.
+**Recommendation:** one GitHub Action and one Snippets database. Write a native code block (B) for search, MCP and API, and an HTML block (C) for the view on doc pages.
 
 Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c91e245786818b8b67f68c42e4b491) (private). Repo: public since the emgithub test.
 
 ## Comparison
 
-| Question | A: emgithub embed (public repo) | B: Action to code block |
+| Question | A: emgithub embed | B: native code block | C: HTML block |
+|---|---|---|---|
+| 1. Setup | 1 min. Public repo only | Action, token, database | Same Action as B |
+| 2. Partial region | Fixed line range in the URL | Range, symbol, marker, file | Same selectors as B |
+| 3. Line numbers | Real, in the frame | Caption range, or in the text | Real, in a column |
+| 4. Look in Notion | Frame, scroll inside | Native block, no scroll | Frame, scroll, colors |
+| 5. Refresh | Page view, 2.5 min after push | Action, 20 s after merge | Action, by API (tested: 1.3 s) |
+| 6. Search, AI, MCP | AI only | Search, AI, MCP | AI only |
+
+### What a program reads through the Notion API
+
+[`scripts/read-blocks.mjs`](scripts/read-blocks.mjs) reads each test page through the API. Full output: [`docs/read-output/`](docs/read-output/).
+
+| Approach | API result | Code readable? |
 |---|---|---|
-| 1. Setup | 1 min, no secret. Public repo only | About 15 min: integration, secret, 2 files |
-| 2. Partial region | Fixed line range in the URL | Line range, symbol, marker or whole file |
-| 3. Line numbers | Real numbers, in the frame | Real numbers: caption range or in the text |
-| 4. Look in Notion | Frame with own style, scroll inside | Native code block with C# colors |
-| 5. Refresh | At page view, 2.5 min after the push | 20 s after the merge, by the Action |
-| 6. Search, AI, MCP | AI: yes. Search, MCP: no | Search, AI and MCP: yes |
+| A: embed | `[embed] url: https://emgithub.com/iframe.html?target=...` | No. Only the URL |
+| B: synced code block | `[synced_block] reference` → `[code] language=c# caption="src/OrderService.cs#L36-L42 @ 9c420b3"` and the code | Yes, directly |
+| C: HTML block | `[embed] url: https://prod-files-secure.s3...order-service.html` | Yes, after a second download, inside HTML |
+
+B output for the doc page (shortened):
+
+```
+## How the total is calculated
+[synced_block] reference to accb2cb1-f643-46a7-a8d1-af84950d45e6
+  [code] language=c# caption="src/OrderService.cs#L36-L42 @ 9c420b3"
+    | public decimal Total(Order order)
+    | {
+    |     var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
+    |     if (subtotal < 0)
+    |         throw new InvalidOperationException($"A total cannot be negative: {subtotal}.");
+    |     return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
+    | }
+```
 
 ## All options: one push, measured
 
@@ -23,7 +48,8 @@ Test: commit `9c420b3` added 2 lines above `Create` and changed one line in `Tot
 
 | Option | Shows | Refresh after the push | Steps and cost | Search, AI, MCP |
 |---|---|---|---|---|
-| A1 GitHub file link | Nothing | None | None | No |
+| A1 GitHub file link | Nothing, private and public repo | None | None | No |
+| A1b GitHub link as bookmark | Card with "github.com" and the URL | None | None | No |
 | A2 Gist | Whole file only | At page view, after a Gist update | Gist update for each push. Not automated: needs a PAT | AI only |
 | A5 emgithub, range on `main` | Line range | 2 min 28 s (CDN cache, 5 min maximum) | None. Range drifts: wrong lines after the push | AI only |
 | A6 emgithub, fixed commit | Line range | Never | Edit the URL by hand for each change | AI only |
@@ -47,7 +73,7 @@ Test: commit `9c420b3` added 2 lines above `Create` and changed one line in `Tot
 
 ![Notion AI reads the public emgithub embeds](docs/screenshots/ai-emgithub-public.jpg)
 
-![A1 GitHub link: grey box](docs/screenshots/a1-a2-github-link-and-gist.jpg)
+![A1 on the public repo: still a grey box. A1b bookmark: only a link card](docs/screenshots/a1-public-embed-and-bookmark.jpg)
 
 ![A3 emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-in-notion.jpg)
 

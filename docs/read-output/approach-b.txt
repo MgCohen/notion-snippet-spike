@@ -1,0 +1,27 @@
+[paragraph] This page is a normal documentation page. The code blocks below are synced block references. The original blocks are on  ... (155 chars)
+
+## How an order is made
+[paragraph] OrderService.Create refuses an empty order. It keeps the order in memory.
+[synced_block] reference to d05bf875-2803-4bca-92bd-643e2fc40f73
+  [code] language=c# caption="src/OrderService.cs#L21-L32 @ 9c420b3"
+    | public Order Create(string customer, IEnumerable<OrderLine> lines)
+    | {
+    |     var list = lines.ToList();
+    |     if (list.Count == 0)
+    |         throw new ArgumentException("An order needs at least one line.");
+    |     if (list.Any(l => l.Quantity <= 0))
+    |         throw new ArgumentException("Each line needs a positive quantity.");
+    | 
+    |     var order = new Order(Guid.NewGuid(), customer, list);
+    |     _orders[order.Id] =  ... (426 chars)
+
+## How the total is calculated
+[synced_block] reference to accb2cb1-f643-46a7-a8d1-af84950d45e6
+  [code] language=c# caption="src/OrderService.cs#L36-L42 @ 9c420b3"
+    | public decimal Total(Order order)
+    | {
+    |     var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
+    |     if (subtotal < 0)
+    |         throw new InvalidOperationException($"A total cannot be negative: {subtotal}.");
+    |     return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
+    | }

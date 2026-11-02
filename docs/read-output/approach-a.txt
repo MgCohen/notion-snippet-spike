@@ -1,0 +1,31 @@
+
+## A1. GitHub file link, line range (private repo)
+[embed] caption="GitHub blob URL with #L16-L25"
+  url: https://github.com/MgCohen/notion-snippet-spike/blob/main/src/OrderService.cs#L16-L25
+
+## A1b. GitHub file link as a bookmark (public repo)
+[bookmark] url: https://github.com/MgCohen/notion-snippet-spike/blob/main/src/OrderService.cs#L21-L32 caption="GitHub file link as a bookmark"
+
+## A2. Gist (secret)
+[embed] caption="Secret Gist"
+  url: https://gist.github.com/MgCohen/9fc74392d1371c79055e21b2584b2f47
+
+## A3. emgithub iframe, line range (private repo)
+[embed] caption="emgithub, private repo"
+  url: https://emgithub.com/iframe.html?target=https%3A%2F%2Fgithub.com%2FMgCohen%2Fnotion-snippet-spike%2Fblob%2Fmain%2Fsrc%2FOrderService.cs%23L16-L25&style=github&t ... (245 chars)
+
+## A4. emgithub iframe, line range (public repo, for reference)
+[embed] caption="emgithub, public repo"
+  url: https://emgithub.com/iframe.html?target=https%3A%2F%2Fgithub.com%2Fdotnet%2Fruntime%2Fblob%2Fmain%2Fsrc%2Flibraries%2FSystem.Linq%2Fsrc%2FSystem%2FLinq%2FSum.cs ... (270 chars)
+
+## A5. emgithub, public repo, lines 19-30 on main
+[embed] caption="emgithub, main, L19-L30 (Create)"
+  url: https://emgithub.com/iframe.html?target=https%3A%2F%2Fgithub.com%2FMgCohen%2Fnotion-snippet-spike%2Fblob%2Fmain%2Fsrc%2FOrderService.cs%23L19-L30&style=github&t ... (245 chars)
+
+## A6. emgithub, public repo, lines 34-40 at commit a9fcaa5
+[embed] caption="emgithub, pinned commit, L34-L40 (Total)"
+  url: https://emgithub.com/iframe.html?target=https%3A%2F%2Fgithub.com%2FMgCohen%2Fnotion-snippet-spike%2Fblob%2Fa9fcaa5ef0e47d9345b57a471e5cb89190d0b3a9%2Fsrc%2FOrde ... (281 chars)
+
+## A7. emgithub, public repo, whole file
+[embed] caption="emgithub, main, whole file"
+  url: https://emgithub.com/iframe.html?target=https%3A%2F%2Fgithub.com%2FMgCohen%2Fnotion-snippet-spike%2Fblob%2Fmain%2Fsrc%2FOrderService.cs&style=github&type=code&s ... (235 chars)
