@@ -1,6 +1,6 @@
 # Live GitHub code in Notion: spike
 
-Approach B (a GitHub Action that writes native Notion code blocks) works end to end. A push to `main` updates the Notion block in about 22 seconds. Approach A (embed blocks) cannot show code from a private repo, and Notion search, Notion AI and the Notion MCP cannot read embedded code.
+Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a push to `main` updates the Notion block in about 22 seconds. Approach A (embed blocks) shows no code from a private repo; only a Gist copy works, and a push does not update it. Notion search and the Notion MCP read only the code of Approach B.
 
 **Recommendation:** use Approach B for documentation in Notion.
 
@@ -10,29 +10,36 @@ Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c9
 
 | Question | A: embed block | B: Action to code block |
 |---|---|---|
-| 1. Setup | 1 min, no secret. Private repo: does not work | About 15 min: integration, secret, 2 files |
-| 2. Partial region | emgithub only (`#L10-L30`), public repos only | Yes, by `@snippet` markers |
-| 3. Line numbers | emgithub: real numbers. Gist: Gist numbers | No native option. Caption `path#L16-L27` with permalink |
-| 4. Look in Notion | iframe, own style, fixed height | Native code block, C# colors, caption |
-| 5. Refresh | Each page view. GitHub raw cache: 300 s | Only on push to `main`. About 22 s |
-| 6. Search, AI, MCP | Cannot read the code. Only URL and caption | Search and MCP read the code. AI: expected |
+| 1. Setup | 1 min, no secret | About 15 min: integration, secret, 2 files |
+| 2. Partial region | emgithub only, public repos only | Yes, by `@snippet` markers |
+| 3. Line numbers | Yes. Real only for a full file | No native option. Caption or numbers in text |
+| 4. Look in Notion | iframe with fixed height and own style | Native code block with C# colors |
+| 5. Refresh | Each page view. Gist: manual copy | Only on push to `main`. About 22 s |
+| 6. Search, AI, MCP | Search, MCP: no. AI: Gist only | Search, AI and MCP: yes |
 
 ## Approach A: embed block
 
 Test page: [Approach A: embed blocks](https://www.notion.so/40c91e2457868133844ed1c3ff1ca543).
 
-| Embed | URL type | Result |
+| Embed | URL type | Result in Notion |
 |---|---|---|
-| A1 | GitHub file URL with `#L16-L25` | GitHub sends `X-Frame-Options: deny`. Private file gives 404 without login |
-| A2 | Secret Gist | A copy of the file. A push to the repo does not change it |
-| A3 | emgithub, private repo | 404: emgithub reads `raw.githubusercontent.com` without a token |
-| A4 | emgithub, public repo | Works: line range, real line numbers, colors |
+| A1 | GitHub file URL with `#L16-L25` | Grey box, no code. GitHub sends `X-Frame-Options: deny` |
+| A2 | Secret Gist | Full file, lines 1-42, colors. No line range |
+| A3 | emgithub, private repo | `404 Failed to download` |
+| A4 | emgithub, public repo | Lines 10-30 with real line numbers |
 
-![emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-repo.png)
+- A Gist is a separate copy. The push to the repo did not change it. The spike changed it with `gh gist edit`, and Notion then showed the new code.
+- emgithub reads `raw.githubusercontent.com` without a token. Thus it works only for public repos.
+- The Notion MCP returns only the `<embed source="...">` URL and the caption. Notion search finds the headings, but no code.
+- Notion AI read the Gist code. It could not load the private emgithub embed.
 
-![emgithub with a public repo: lines 10-30 with real line numbers](docs/screenshots/a4-emgithub-public-repo.png)
+![A1 GitHub link: grey box. A2 Gist: code](docs/screenshots/a1-a2-github-link-and-gist.jpg)
 
-The Notion MCP returns only the `<embed source="...">` URL and the caption for this page. Notion search finds the headings of this page, but no code text. The code is in an iframe, so it is not part of the page.
+![A2 Gist embed: full file with Gist line numbers](docs/screenshots/a2-gist-embed.jpg)
+
+![A3 emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-in-notion.jpg)
+
+![A4 emgithub with a public repo: lines 10-30](docs/screenshots/a4-emgithub-public-in-notion.jpg)
 
 ## Approach B: GitHub Action to native code block
 
@@ -83,14 +90,18 @@ A manifest entry. The script finds the first code block on the page, also inside
 | Snippet page | Original synced block with the code block |
 | Doc page | Prose and a synced block reference for each snippet |
 
-The test doc page is [Approach B: doc page with synced snippets](https://www.notion.so/40c91e2457868153bdb1f981af6e2f49). The Action writes only the original block. The reference on the doc page shows the new code at the same time.
+The Action writes only the original block. The synced block reference on the [doc page](https://www.notion.so/40c91e2457868153bdb1f981af6e2f49) shows the new code at the same time.
+
+![Doc page: synced code block with caption and permalink](docs/screenshots/b-doc-page-synced.jpg)
+
+![Snippets database: Path, Region and Commit from the Action](docs/screenshots/b-snippets-database.jpg)
 
 ### Test runs
 
 | Run | Change | Blocks updated | API calls | Time |
 |---|---|---|---|---|
 | [41483652691](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41483652691) | First sync | 4 | 15 | 15 s |
-| [41483858624](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41483858624) | 2 regions changed, lines moved | 4 | 15 | 18 s run, 22 s from push |
+| [41483858624](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41483858624) | 2 regions changed, lines moved | 4 | 15 | 22 s from push |
 | [41484007049](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41484007049) | Script only, no region change | 0 | 8 | 16 s |
 
 In the second run, `create-order` became 2 lines longer. The markers kept each region correct: `order-total` moved from `L29-L33` to `L31-L35`, and the caption shows the new range.
@@ -99,12 +110,14 @@ In the second run, `create-order` became 2 lines longer. The markers kept each r
 
 Notion code blocks have no line-number option. The spike tested two ways to show the real file line numbers.
 
-| Way | Example | Copy and search | Result |
+| Way | Example | Copy and search | Look |
 |---|---|---|---|
-| Caption | `src/OrderService.cs#L16-L27 @ f60adb7`, link to the permalink | Clean code | **Recommended** |
-| Numbers in the code text | `21  if (list.Any(l => l.Quantity <= 0))` | Numbers go into copy and search | Use only for line-by-line text |
+| Caption | `src/OrderService.cs#L16-L27 @ f60adb7` | Clean code | Small grey line under the block |
+| Numbers in the code text | `21  if (list.Any(...))` | Numbers go into copy and search | Like an editor, number on each line |
 
-The caption link opens GitHub at the exact commit and line range. Notion search showed the numbers inside the highlight text for the numbered variant.
+![Both ways: caption only (top), numbers in the code text (bottom)](docs/screenshots/b-snippet-page-line-numbers.jpg)
+
+Numbers in the code text look better. Use them when the prose refers to specific lines. Use the caption in all other cases, because copy and search then get clean code. Both ways keep the caption, which links to GitHub at the exact commit and line range.
 
 ### Cost
 
@@ -120,10 +133,16 @@ If a region does not change, the script does not write the block. The caption th
 
 ### Search, Notion AI and MCP
 
-- Notion search found `MidpointRounding.AwayFromZero` and `Each line needs a positive quantity` some seconds after the run.
+| Reader | Result |
+|---|---|
+| Notion search | Found the new code some seconds after the run |
+| Notion AI | Quoted `return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);` |
+| Notion MCP `fetch` | Returns the code on the snippet page and the doc page |
+
 - A search hit points to the Snippets page, not to the doc page with the synced block reference.
-- The Notion MCP `fetch` returns the code on the snippet page and on the doc page. It does not return the caption.
-- Notion AI was not tested directly. It reads page blocks, so it should read native code blocks.
+- The MCP `fetch` does not return the caption.
+
+![Notion AI quotes the synced code line](docs/screenshots/ai-approach-b.jpg)
 
 ## Setup for Approach B
 
@@ -140,5 +159,4 @@ If a region does not change, the script does not write the block. The caption th
 
 - Do not edit a synced code block in Notion. The next change of that region replaces the edit.
 - The Snippets page and the manifest are manual work for each new snippet. A next step can make the Snippets page from the script when a new marker appears.
-- Screenshots of the Notion pages are not in this report. The Claude in Chrome extension was not connected to the Claude Code session.
 - The Notion token was shared in a chat. Rotate it in the Notion integration settings, then run `gh secret set NOTION_TOKEN` again.
