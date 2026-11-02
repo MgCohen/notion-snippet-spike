@@ -1,0 +1,9 @@
+{
+  "repo": "MgCohen/notion-snippet-spike",
+  "targets": [
+    { "snippet": "create-order", "page": "40c91e245786816d8f59f6947a354c3d" },
+    { "snippet": "create-order", "page": "40c91e245786816d8f59f6947a354c3d", "codeBlockIndex": 1, "lineNumbers": true, "updateProperties": false },
+    { "snippet": "order-total", "page": "40c91e245786810bb058d0d7fcb446da" },
+    { "snippet": "find-order", "page": "40c91e245786819e805dd96f2b6376a3" }
+  ]
+}
