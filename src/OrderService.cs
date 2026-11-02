@@ -12,6 +12,9 @@ public class OrderService
 {
     private readonly Dictionary<Guid, Order> _orders = new();
 
+    /// <summary>Largest number of lines in one order.</summary>
+    public const int MaxLines = 50;
+
     // @snippet: create-order
     public Order Create(string customer, IEnumerable<OrderLine> lines)
     {
@@ -31,6 +34,8 @@ public class OrderService
     public decimal Total(Order order)
     {
         var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
+        if (subtotal < 0)
+            throw new InvalidOperationException("A total cannot be negative.");
         return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
     }
     // @end-snippet
