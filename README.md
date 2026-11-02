@@ -1,6 +1,6 @@
 # Live GitHub code in Notion: spike
 
-Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a push to `main` updates the Notion block in about 22 seconds. Approach A (embed blocks) shows no code from a private repo; only a Gist copy works, and a push does not update it. Notion search and the Notion MCP read only the code of Approach B.
+Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a merge to `main` updates the Notion blocks in about 18 seconds. A Notion database is the registry of all code blocks, so each run knows which blocks changed. Approach A (embed blocks) shows no code from a private repo, and Notion search and the Notion MCP cannot read embedded code.
 
 **Recommendation:** use Approach B for documentation in Notion.
 
@@ -11,10 +11,10 @@ Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c9
 | Question | A: embed block | B: Action to code block |
 |---|---|---|
 | 1. Setup | 1 min, no secret | About 15 min: integration, secret, 2 files |
-| 2. Partial region | emgithub only, public repos only | Yes, by `@snippet` markers |
-| 3. Line numbers | Yes. Real only for a full file | No native option. Caption or numbers in text |
+| 2. Partial region | emgithub only, public repos only | Line range, symbol, marker or whole file |
+| 3. Line numbers | Yes. Real only for a full file | Real numbers: caption range or in the text |
 | 4. Look in Notion | iframe with fixed height and own style | Native code block with C# colors |
-| 5. Refresh | Each page view. Gist: manual copy | Only on push to `main`. About 22 s |
+| 5. Refresh | Each page view. Gist: manual copy | On merge, PR plan, nightly or manual |
 | 6. Search, AI, MCP | Search, MCP: no. AI: Gist only | Search, AI and MCP: yes |
 
 ## Approach A: embed block
@@ -24,22 +24,20 @@ Test page: [Approach A: embed blocks](https://www.notion.so/40c91e2457868133844e
 | Embed | URL type | Result in Notion |
 |---|---|---|
 | A1 | GitHub file URL with `#L16-L25` | Grey box, no code. GitHub sends `X-Frame-Options: deny` |
-| A2 | Secret Gist | Full file, lines 1-42, colors. No line range |
+| A2 | Secret Gist | Full file, Gist line numbers, colors. No line range |
 | A3 | emgithub, private repo | `404 Failed to download` |
 | A4 | emgithub, public repo | Lines 10-30 with real line numbers |
 
-- A Gist is a separate copy. The push to the repo did not change it. The spike changed it with `gh gist edit`, and Notion then showed the new code.
+- A Gist is a separate copy. A push to the repo does not change it.
 - emgithub reads `raw.githubusercontent.com` without a token. Thus it works only for public repos.
-- The Notion MCP returns only the `<embed source="...">` URL and the caption. Notion search finds the headings, but no code.
+- The Notion MCP returns only the embed URL and the caption. Notion search finds no code.
 - Notion AI read the Gist code. It could not load the private emgithub embed.
 
 ![A1 GitHub link: grey box. A2 Gist: code](docs/screenshots/a1-a2-github-link-and-gist.jpg)
 
-![A2 Gist embed: full file with Gist line numbers](docs/screenshots/a2-gist-embed.jpg)
-
 ![A3 emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-in-notion.jpg)
 
-![A4 emgithub with a public repo: lines 10-30](docs/screenshots/a4-emgithub-public-in-notion.jpg)
+![Notion AI reads the Gist, not the private emgithub embed](docs/screenshots/ai-approach-a.jpg)
 
 ## Approach B: GitHub Action to native code block
 
@@ -47,89 +45,109 @@ Test page: [Approach A: embed blocks](https://www.notion.so/40c91e2457868133844e
 
 ```mermaid
 flowchart LR
-    A[Push to main] --> B[Action runs sync-snippets.mjs]
-    B --> C[Find @snippet regions]
-    C --> D[Read notion-snippets.json]
-    D --> E[PATCH code block]
-    E --> F[PATCH Snippets row]
-    E --> G[Synced block on doc pages]
+    A[Merge to main] --> B[Query Snippets database]
+    B --> C[Select code for each row]
+    C --> D{Row hash same?}
+    D -->|yes| E[No write]
+    D -->|no| F[PATCH code block and row]
+    F --> G[Job summary]
 ```
-
-### Parts
 
 | File | Purpose |
 |---|---|
-| [`src/OrderService.cs`](src/OrderService.cs) | Sample code with 3 regions |
-| [`scripts/sync-snippets.mjs`](scripts/sync-snippets.mjs) | Finds regions and writes Notion blocks. No dependencies |
-| [`notion-snippets.json`](notion-snippets.json) | Manifest: snippet name to Notion page |
-| [`.github/workflows/notion-snippets.yml`](.github/workflows/notion-snippets.yml) | Runs the script on push to `main` |
+| [`scripts/sync-snippets.mjs`](scripts/sync-snippets.mjs) | Selects code and writes Notion blocks. No dependencies |
+| [`.github/workflows/notion-snippets.yml`](.github/workflows/notion-snippets.yml) | Triggers and modes |
+| [`notion-snippets.json`](notion-snippets.json) | Repo name and Snippets database ID |
+| [`src/OrderService.cs`](src/OrderService.cs) | Sample code |
 
-A region in the source:
+### Registry: the Snippets database
 
-```csharp
-// @snippet: order-total
-public decimal Total(Order order)
-{
-    var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
-    return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
-}
-// @end-snippet
-```
+Each row is one Notion code block. A person writes the input. The Action writes the output.
 
-A manifest entry. The script finds the first code block on the page, also inside a synced block. If you give `block`, the script uses that block ID directly.
+| Property | Written by | Example |
+|---|---|---|
+| Selector | Person | `lines 19-30`, `symbol OrderService.Total` |
+| Path | Person (Action for `snippet`) | `src/OrderService.cs` |
+| Status, Message | Action | `In sync`, or `Error` with the reason |
+| Hash, Block ID | Action | `76440fc9f43a18c5`, ID of the code block |
+| Region, Commit | Action | `L19-L30` and `a9fcaa5`, both links to GitHub |
 
-```json
-{ "snippet": "order-total", "page": "40c91e245786810bb058d0d7fcb446da" }
-```
-
-### Notion structure
-
-| Item | Contents |
-|---|---|
-| Snippets database | One page for each snippet. Properties: Repo, Path, Region, Language, Commit, Updated |
-| Snippet page | Original synced block with the code block |
-| Doc page | Prose and a synced block reference for each snippet |
-
-The Action writes only the original block. The synced block reference on the [doc page](https://www.notion.so/40c91e2457868153bdb1f981af6e2f49) shows the new code at the same time.
+The code block is the first code block on the row page. Doc pages show it with a synced block reference, and the reference shows each update at the same time.
 
 ![Doc page: synced code block with caption and permalink](docs/screenshots/b-doc-page-synced.jpg)
 
-![Snippets database: Path, Region and Commit from the Action](docs/screenshots/b-snippets-database.jpg)
+![The registry: Selector, Status and Region for each code block](docs/screenshots/registry-table.jpg)
+
+### Selectors
+
+| Selector | Selects | Follows code changes |
+|---|---|---|
+| `lines 16-27` | Line range | Yes, by the git diff since the last sync |
+| `lines 16-27 @f60adb7` | Line range at a fixed commit | No, it never changes |
+| `file` | Whole file | Yes |
+| `symbol OrderService.Total` | Class, record or method | Yes, by name |
+| `snippet create-order` | `// @snippet:` to `// @end-snippet` | Yes, by marker |
+
+Options after a selector:
+
+- `max 12`: shows the first 12 lines, then `// ... 14 more lines, see the caption link`. Notion code blocks have no height limit or scroll.
+- `numbers`: puts the real file line numbers in the code text.
+
+The `lines` selector follows the code. Before each sync, the script reads `git diff` from the commit of the last sync. If lines above the range change, the range moves, and the Action writes the new `Selector`. If the diff touches the range, the summary says "edited".
+
+![Line range L16-L27 moved to L19-L30 after a merge](docs/screenshots/range-moved.jpg)
+
+![symbol OrderService with max 12 and numbers](docs/screenshots/symbol-class-max-lines.jpg)
+
+### Change detection
+
+The hash is for one row only: language, `path#Lx-Ly` and the selected code text. The commit is not in the hash.
+
+| Change in a push | Result for a row | Notion calls |
+|---|---|---|
+| Other file, or other region of the same file | No write | 0 |
+| Code of the region | Write block and row | 2 |
+| Lines above the region only | Write: the caption range changed | 2 |
+| Selector finds no code | `Status` = Error, run fails | 1, then 0 while the error stays |
+
+Each run also does 1 database query for each 100 rows.
+
+![A selector that finds no code: Status Error with the reason](docs/screenshots/error-row.jpg)
+
+### Triggers
+
+| Trigger | Mode | Purpose |
+|---|---|---|
+| Push to `main` (PR merge) | apply | Write the blocks that changed |
+| Pull request | plan | List the blocks that the merge changes. Writes nothing |
+| Nightly schedule | apply | Give code to rows added in Notion |
+| Manual (`gh workflow run`) | plan, apply or force | `force` writes all blocks again |
+
+A Notion button that starts the workflow (`repository_dispatch`) is possible, but the spike did not test it.
 
 ### Test runs
 
-| Run | Change | Blocks updated | API calls | Time |
-|---|---|---|---|---|
-| [41483652691](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41483652691) | First sync | 4 | 15 | 15 s |
-| [41483858624](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41483858624) | 2 regions changed, lines moved | 4 | 15 | 22 s from push |
-| [41484007049](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41484007049) | Script only, no region change | 0 | 8 | 16 s |
+| Run | Event | Result | API calls |
+|---|---|---|---|
+| [41487744189](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41487744189) | First registry run | 9 new | 31 (finds block IDs) |
+| [41488112900](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488112900) | [PR #1](https://github.com/MgCohen/notion-snippet-spike/pull/1) plan | 8 will update, 1 unchanged | 1 |
+| [41488181759](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488181759) | Merge of PR #1 | 8 updated, 1 unchanged, 18 s | 17 |
+| [41488311983](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488311983) | Manual, 1 bad selector | 9 unchanged, 1 error | 2 |
 
-In the second run, `create-order` became 2 lines longer. The markers kept each region correct: `order-total` moved from `L29-L33` to `L31-L35`, and the caption shows the new range.
+PR #1 added 3 lines above `Create` and changed `Total`. The pinned range was the only unchanged row.
 
 ### Line numbers
 
-Notion code blocks have no line-number option. The spike tested two ways to show the real file line numbers.
+Notion code blocks have no line-number option. Each block gets a caption with the real range, for example `src/OrderService.cs#L19-L30 @ a9fcaa5`. The caption links to GitHub at that commit and range.
 
-| Way | Example | Copy and search | Look |
-|---|---|---|---|
-| Caption | `src/OrderService.cs#L16-L27 @ f60adb7` | Clean code | Small grey line under the block |
-| Numbers in the code text | `21  if (list.Any(...))` | Numbers go into copy and search | Like an editor, number on each line |
+| Way | Copy and search | Look |
+|---|---|---|
+| Caption only | Clean code | Small grey line under the block |
+| `numbers` option | Numbers go into copy and search | Like an editor |
 
-![Both ways: caption only (top), numbers in the code text (bottom)](docs/screenshots/b-snippet-page-line-numbers.jpg)
+Numbers in the text look better. Use `numbers` when the prose refers to specific lines. Use the caption only in all other cases.
 
-Numbers in the code text look better. Use them when the prose refers to specific lines. Use the caption in all other cases, because copy and search then get clean code. Both ways keep the caption, which links to GitHub at the exact commit and line range.
-
-### Cost
-
-| Item | Value |
-|---|---|
-| API calls, all regions changed | 4 for each snippet: 2 GET, 2 PATCH |
-| API calls, no region changed | 2 GET for each snippet |
-| API calls with `block` IDs | 1 GET for each snippet, plus 2 PATCH on a change |
-| Notion rate limit | 3 requests/second on average |
-| Action time | 15 to 18 s, 1 billed minute for each push |
-
-If a region does not change, the script does not write the block. The caption then keeps the older commit. That permalink shows the same code.
+![Caption only (top) and the numbers option (bottom)](docs/screenshots/b-snippet-page-line-numbers.jpg)
 
 ### Search, Notion AI and MCP
 
@@ -137,26 +155,38 @@ If a region does not change, the script does not write the block. The caption th
 |---|---|
 | Notion search | Found the new code some seconds after the run |
 | Notion AI | Quoted `return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);` |
-| Notion MCP `fetch` | Returns the code on the snippet page and the doc page |
+| Notion MCP `fetch` | Returns the code on the row page and the doc page |
 
-- A search hit points to the Snippets page, not to the doc page with the synced block reference.
+- A search hit points to the row page, not to the doc page with the synced block reference.
 - The MCP `fetch` does not return the caption.
 
 ![Notion AI quotes the synced code line](docs/screenshots/ai-approach-b.jpg)
 
+## Related tools
+
+No known tool writes a code region into a native Notion code block (search of November 2026).
+
+| Tool | What it does | Gap |
+|---|---|---|
+| [SnippSync](https://www.producthunt.com/p/snippsync/snippsync) | Line range from GitHub, updates on push | iframe embed, like Approach A. Paid |
+| [notion-docs-sync](https://github.com/imnotjames/notion-docs-sync), [sync-repo-docs-to-notion](https://github.com/pechorin/sync-repo-docs-to-notion) | Repo Markdown files to Notion pages | Full pages only |
+| [Notion GitHub integration](https://www.notion.com/zh-cn/help/guides/bring-your-codebase-into-context-with-notions-github-integration) | PR and issue previews, line permalinks | A link, no code |
+| [MarkdownSnippets](https://mysticmind-dev.pages.dev/how-to-keep-dotnet-documentation-code-samples-in-sync-with-code-base), [snex](https://github.com/pellepelster/snex), [Swimm](https://docs.swimm.io/ide-integrations/vs-code/ide-plugins-vscode-keep-docs-up-to-date) | Snippets in repo docs stay equal to code | Markdown in the repo, not Notion |
+
 ## Setup for Approach B
 
 1. Make an internal Notion integration with "read content" and "update content".
-2. Connect the integration to the parent page of the Snippets database.
+2. Connect the integration to the page that holds the Snippets database.
 3. Run `gh secret set NOTION_TOKEN -R <owner>/<repo>`. Do not commit the token.
 4. Copy `scripts/sync-snippets.mjs` and `.github/workflows/notion-snippets.yml` into the repo.
-5. Add `// @snippet: name` and `// @end-snippet` around each region.
-6. Make a Snippets page for each region, with a synced block that holds a code block.
-7. Add each snippet to `notion-snippets.json`.
-8. Run `node scripts/sync-snippets.mjs --dry-run` to see the regions.
+5. Write the repo name and the database ID in `notion-snippets.json`.
+6. For each code block, add a row with `Selector`, `Path` and an empty code block.
+7. Run `gh workflow run notion-snippets.yml -f mode=plan` to see the result first.
 
 ## Limits and open points
 
-- Do not edit a synced code block in Notion. The next change of that region replaces the edit.
-- The Snippets page and the manifest are manual work for each new snippet. A next step can make the Snippets page from the script when a new marker appears.
+- Do not edit a synced code block in Notion. The next change of that row replaces the edit.
+- The `symbol` selector reads C#-like syntax with a simple parser. Roslyn is more correct for C#.
+- C# `#region name` blocks are not a selector yet. A small change to the marker pattern can add them.
+- Notion makes `OrderService.Total` in a text property a link. The script reads the plain text, so the selector still works.
 - The Notion token was shared in a chat. Rotate it in the Notion integration settings, then run `gh secret set NOTION_TOKEN` again.
