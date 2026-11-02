@@ -15,6 +15,8 @@ public class OrderService
     /// <summary>Largest number of lines in one order.</summary>
     public const int MaxLines = 50;
 
+    public int Count => _orders.Count;
+
     // @snippet: create-order
     public Order Create(string customer, IEnumerable<OrderLine> lines)
     {
@@ -35,7 +37,7 @@ public class OrderService
     {
         var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
         if (subtotal < 0)
-            throw new InvalidOperationException("A total cannot be negative.");
+            throw new InvalidOperationException($"A total cannot be negative: {subtotal}.");
         return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
     }
     // @end-snippet
