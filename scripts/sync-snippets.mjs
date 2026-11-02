@@ -117,6 +117,24 @@ function parseSelector(selector) {
   return s;
 }
 
+// Moves a line range by the git diff from the last synced commit to now.
+// Returns null if the file did not change, else { from, to, edited }.
+function followRange(path, from, to, since) {
+  if (!since) return null;
+  let diff;
+  try { diff = execSync(`git diff -U0 ${since} ${sha} -- ${path}`, { encoding: "utf8" }); } catch { return null; }
+  if (!diff) return null;
+  let shift = 0, grow = 0, edited = false;
+  for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const oldStart = Number(m[1]), oldCount = m[2] === undefined ? 1 : Number(m[2]);
+    const delta = (m[4] === undefined ? 1 : Number(m[4])) - oldCount;
+    const oldEnd = oldCount === 0 ? oldStart : oldStart + oldCount - 1; // count 0: insert after oldStart
+    if (oldEnd < from) shift += delta;
+    else if (oldStart <= to) { grow += delta; edited = true; }
+  }
+  return { from: from + shift, to: to + shift + grow, edited };
+}
+
 function resolve(row, markers) {
   const s = parseSelector(row.selector);
   let path = row.path, from = 1, to, all;
@@ -131,6 +149,12 @@ function resolve(row, markers) {
     to = all.length;
     if (s.kind === "lines") {
       [from, to] = s.arg.split("-").map(Number);
+      const moved = s.ref ? null : followRange(path, from, to, row.commit);
+      if (moved && (moved.from !== from || moved.to !== to || moved.edited)) {
+        s.follow = { old: `${from}-${to}`, edited: moved.edited };
+        ({ from, to } = moved);
+        s.newSelector = row.selector.replace(/^lines\s+\d+-\d+/, `lines ${from}-${to}`);
+      }
       if (!(from >= 1 && to >= from && to <= all.length)) throw new Error(`lines ${s.arg} not in ${path} (${all.length} lines)`);
     } else if (s.kind === "symbol") [from, to] = findSymbol(all, s.arg);
   }
@@ -196,7 +220,7 @@ async function readRegistry() {
       const pr = p.properties;
       rows.push({
         id: p.id, name: plain(pr.Name), selector: plain(pr.Selector), path: plain(pr.Path),
-        hash: plain(pr.Hash), blockId: plain(pr["Block ID"]), status: pr.Status?.select?.name, message: plain(pr.Message),
+        commit: plain(pr.Commit), hash: plain(pr.Hash), blockId: plain(pr["Block ID"]), status: pr.Status?.select?.name, message: plain(pr.Message),
       });
     }
     cursor = page.has_more ? page.next_cursor : undefined;
@@ -259,9 +283,11 @@ for (const row of rows) {
     continue;
   }
   const changed = force || r.hash !== row.hash || row.status !== "In sync";
-  if (mode === "local") { console.log(`--- ${row.name} [${row.selector}] ${r.anchor} ${r.hash}\n${r.text}`); continue; }
-  if (!changed) { results.push({ row, result: "unchanged", note: r.anchor }); continue; }
-  if (mode === "plan") { results.push({ row, result: row.hash ? "will update" : "new", note: r.anchor }); continue; }
+  const f = region.follow;
+  const note = f ? `${r.anchor} (range ${f.edited ? "edited" : "moved"}, was ${f.old})` : r.anchor;
+  if (mode === "local") { console.log(`--- ${row.name} [${row.selector}] ${note} ${r.hash}\n${r.text}`); continue; }
+  if (!changed) { results.push({ row, result: "unchanged", note }); continue; }
+  if (mode === "plan") { results.push({ row, result: row.hash ? "will update" : "new", note }); continue; }
 
   try {
     const blockId = await writeBlock(row, r);
@@ -277,9 +303,10 @@ for (const row of rows) {
         "Block ID": text(blockId),
         Status: { select: { name: "In sync" } },
         Message: text(""),
+        ...(region.newSelector ? { Selector: text(region.newSelector) } : {}),
       },
     });
-    results.push({ row, result: row.hash ? "updated" : "new", note: r.anchor });
+    results.push({ row, result: row.hash ? "updated" : "new", note });
   } catch (e) {
     results.push({ row, result: "error", note: e.message });
   }
