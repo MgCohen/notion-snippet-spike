@@ -51,6 +51,25 @@ Test: commit `9c420b3` added 2 lines above `Create` and changed one line in `Tot
 
 ![A3 emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-in-notion.jpg)
 
+## Approach C: HTML block
+
+Test page: [Approach C: HTML block](https://www.notion.so/40c91e2457868140b52ffc9112d923e8). [`scripts/render-html.mjs`](scripts/render-html.mjs) makes a self-contained HTML file from a line range. [`scripts/html-update-test.mjs`](scripts/html-update-test.mjs) replaces the file of the block through the Notion API.
+
+| Check | Result |
+|---|---|
+| Real line numbers, aligned | Yes (11-49, then 21-32) |
+| Height limit with scroll | Yes, vertical and horizontal, inside the block |
+| Colors | Yes. highlight.js loads from a CDN in the frame |
+| Update by API (no person) | Yes: 4 calls, 1.3 s. Upload file, then `PATCH` the block with `embed.file_upload` |
+| Private repo | Yes. The code is in the file, not fetched from GitHub |
+| Notion AI | Read line 18 from the HTML file |
+| Notion search | No. Only the page text matched |
+| Notion MCP `fetch` | No. Only a file reference |
+
+![HTML block: real line numbers, colors, scroll](docs/screenshots/c-html-block.jpg)
+
+![HTML block after the API update: lines 21-32](docs/screenshots/c-html-updated.jpg)
+
 ## Approach B: GitHub Action to native code block
 
 ### Flow
@@ -198,6 +217,14 @@ No known tool writes a code region into a native Notion code block (search of No
 7. Run `gh workflow run notion-snippets.yml -f mode=plan` to see the result first.
 
 ## Limits and open points
+
+Found by an independent audit of this report, not yet fixed:
+
+- A row with an error fails the run one time only. Later runs show "error (known)" and succeed.
+- An insert directly after the last line of a `lines` range makes the range grow. Ranges do not follow a file rename.
+- The `symbol` parser can select a call line above the declaration, and it cannot select properties or overloads by signature.
+- Many rows on one file: lines added at the top rewrite all of them (2 calls each). Not tested against the Notion rate limit.
+- The native Notion GitHub link preview (OAuth, private repos) was not tested.
 
 - Do not edit a synced code block in Notion. The next change of that row replaces the edit.
 - The `symbol` selector reads C#-like syntax with a simple parser. Roslyn is more correct for C#.
