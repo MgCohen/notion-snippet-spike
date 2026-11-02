@@ -88,6 +88,7 @@ Test page: [Approach C: HTML block](https://www.notion.so/40c91e2457868140b52ffc
 | Colors | Yes. highlight.js loads from a CDN in the frame |
 | Update by API (no person) | Yes: 4 calls, 1.3 s. Upload file, then `PATCH` the block with `embed.file_upload` |
 | Private repo | Yes. The code is in the file, not fetched from GitHub |
+| Reuse on many pages | Yes. HTML block in a synced block. One API update showed on the doc page reference |
 | Notion AI | Read line 18 from the HTML file |
 | Notion search | No. Only the page text matched |
 | Notion MCP `fetch` | No. Only a file reference |
