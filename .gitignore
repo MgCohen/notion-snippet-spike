@@ -1,0 +1,6 @@
+.env
+*.token
+node_modules/
+bin/
+obj/
+.claude/
