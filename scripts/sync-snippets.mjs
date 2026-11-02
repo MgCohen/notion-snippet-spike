@@ -110,10 +110,11 @@ async function syncTarget(region, target) {
   else block = (await codeBlocks(target.page))[target.codeBlockIndex ?? 0];
   if (!block) throw new Error(`No code block for "${target.snippet}" on page ${target.page}.`);
 
+  // Skip when the code, the line range and the language are the same. The
+  // caption keeps the older commit then, and that permalink shows the same code.
   const current = block.code.rich_text.map((t) => t.plain_text).join("");
-  const currentCaption = block.code.caption.map((t) => t.plain_text).join("");
-  const newCaption = r.caption.map((t) => t.text.content).join("");
-  if (current === r.text && currentCaption === newCaption && block.code.language === r.language) {
+  const currentAnchor = block.code.caption[0]?.plain_text ?? "";
+  if (current === r.text && currentAnchor === r.caption[0].text.content && block.code.language === r.language) {
     console.log(`= ${target.snippet} (${block.id}) no change`);
     return false;
   }
