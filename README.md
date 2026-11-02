@@ -1,43 +1,55 @@
 # Live GitHub code in Notion: spike
 
-Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a merge to `main` updates the Notion blocks in about 18 seconds. A Notion database is the registry of all code blocks, so each run knows which blocks changed. Approach A (embed blocks) shows no code from a private repo, and Notion search and the Notion MCP cannot read embedded code.
+Approach B (a GitHub Action that writes native Notion code blocks) works end to end: a merge to `main` updates the Notion blocks in about 20 seconds, with no manual step and no agent. A Notion database is the registry of all code blocks, so each run knows which blocks changed. With a public repo, Approach A (emgithub embed) also refreshes with no step, but its line range does not follow the code, and Notion search and the Notion MCP cannot read it.
 
-**Recommendation:** use Approach B for documentation in Notion.
+**Recommendation:** use Approach B for documentation in Notion. If the repo is public, an emgithub embed is acceptable for a whole-file view with scroll.
 
-Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c91e245786818b8b67f68c42e4b491) (private).
+Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c91e245786818b8b67f68c42e4b491) (private). Repo: public since the emgithub test.
 
 ## Comparison
 
-| Question | A: embed block | B: Action to code block |
+| Question | A: emgithub embed (public repo) | B: Action to code block |
 |---|---|---|
-| 1. Setup | 1 min, no secret | About 15 min: integration, secret, 2 files |
-| 2. Partial region | emgithub only, public repos only | Line range, symbol, marker or whole file |
-| 3. Line numbers | Yes. Real only for a full file | Real numbers: caption range or in the text |
-| 4. Look in Notion | iframe with fixed height and own style | Native code block with C# colors |
-| 5. Refresh | Each page view. Gist: manual copy | On merge, PR plan, nightly or manual |
-| 6. Search, AI, MCP | Search, MCP: no. AI: Gist only | Search, AI and MCP: yes |
+| 1. Setup | 1 min, no secret. Public repo only | About 15 min: integration, secret, 2 files |
+| 2. Partial region | Fixed line range in the URL | Line range, symbol, marker or whole file |
+| 3. Line numbers | Real numbers, in the frame | Real numbers: caption range or in the text |
+| 4. Look in Notion | Frame with own style, scroll inside | Native code block with C# colors |
+| 5. Refresh | At page view, 2.5 min after the push | 20 s after the merge, by the Action |
+| 6. Search, AI, MCP | AI: yes. Search, MCP: no | Search, AI and MCP: yes |
 
-## Approach A: embed block
+## All options: one push, measured
 
-Test page: [Approach A: embed blocks](https://www.notion.so/40c91e2457868133844ed1c3ff1ca543).
+Test: commit `9c420b3` added 2 lines above `Create` and changed one line in `Total`. Push at 17:18:51 UTC.
 
-| Embed | URL type | Result in Notion |
-|---|---|---|
-| A1 | GitHub file URL with `#L16-L25` | Grey box, no code. GitHub sends `X-Frame-Options: deny` |
-| A2 | Secret Gist | Full file, Gist line numbers, colors. No line range |
-| A3 | emgithub, private repo | `404 Failed to download` |
-| A4 | emgithub, public repo | Lines 10-30 with real line numbers |
+| Option | Shows | Refresh after the push | Steps and cost | Search, AI, MCP |
+|---|---|---|---|---|
+| A1 GitHub file link | Nothing | None | None | No |
+| A2 Gist | Whole file only | At page view, after a Gist update | Gist update for each push. Not automated: needs a PAT | AI only |
+| A5 emgithub, range on `main` | Line range | 2 min 28 s (CDN cache, 5 min maximum) | None. Range drifts: wrong lines after the push | AI only |
+| A6 emgithub, fixed commit | Line range | Never | Edit the URL by hand for each change | AI only |
+| A7 emgithub, whole file | Whole file, scroll | 2 min 28 s | None | AI only |
+| B Action, registry | Range, symbol, marker, file | 22 s | None. 1 API call, plus 2 for each changed block | Search, AI, MCP |
 
-- A Gist is a separate copy. A push to the repo does not change it.
-- emgithub reads `raw.githubusercontent.com` without a token. Thus it works only for public repos.
-- The Notion MCP returns only the embed URL and the caption. Notion search finds no code.
-- Notion AI read the Gist code. It could not load the private emgithub embed.
+- No option needs an agent. Only A2 and A6 need a manual step.
+- B runs on GitHub Actions: free minutes on a public repo, about 1 billed minute for each push on a private repo.
+- emgithub reads `raw.githubusercontent.com` without a token. A private repo gives 404 (A3). emgithub is a free third-party site, so it is also a dependency.
+- The Notion MCP returns only the embed URL and caption. Notion search found `public int Count => _orders.Count;` only in the Approach B pages.
 
-![A1 GitHub link: grey box. A2 Gist: code](docs/screenshots/a1-a2-github-link-and-gist.jpg)
+![A5 before the push: lines 19-30 show Create](docs/screenshots/a5-before-push.jpg)
+
+![A5 after the push: same range, now starts with an empty line and cuts Create](docs/screenshots/a5-after-push.jpg)
+
+![A6 fixed commit does not change. A7 whole file scrolls inside the frame](docs/screenshots/a6-a7-after-push.jpg)
+
+![A2 Gist after the Gist update: line 18 is the new Count property](docs/screenshots/a2-gist-after-push.jpg)
+
+![B doc page after the push: new Total code, caption L36-L42 @ 9c420b3](docs/screenshots/b-doc-after-push.jpg)
+
+![Notion AI reads the public emgithub embeds](docs/screenshots/ai-emgithub-public.jpg)
+
+![A1 GitHub link: grey box](docs/screenshots/a1-a2-github-link-and-gist.jpg)
 
 ![A3 emgithub with a private repo: 404](docs/screenshots/a3-emgithub-private-in-notion.jpg)
-
-![Notion AI reads the Gist, not the private emgithub embed](docs/screenshots/ai-approach-a.jpg)
 
 ## Approach B: GitHub Action to native code block
 
@@ -133,6 +145,8 @@ A Notion button that starts the workflow (`repository_dispatch`) is possible, bu
 | [41488112900](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488112900) | [PR #1](https://github.com/MgCohen/notion-snippet-spike/pull/1) plan | 8 will update, 1 unchanged | 1 |
 | [41488181759](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488181759) | Merge of PR #1 | 8 updated, 1 unchanged, 18 s | 17 |
 | [41488311983](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488311983) | Manual, 1 bad selector | 9 unchanged, 1 error | 2 |
+| [41488890457](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488890457) | Push of README only | 9 unchanged, 1 known error | 1 |
+| [41489969135](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41489969135) | Push `9c420b3`, all options test | 8 updated, 22 s | 17 |
 
 PR #1 added 3 lines above `Create` and changed `Total`. The pinned range was the only unchanged row.
 
