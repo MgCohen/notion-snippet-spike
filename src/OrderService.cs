@@ -18,6 +18,8 @@ public class OrderService
         var list = lines.ToList();
         if (list.Count == 0)
             throw new ArgumentException("An order needs at least one line.");
+        if (list.Any(l => l.Quantity <= 0))
+            throw new ArgumentException("Each line needs a positive quantity.");
 
         var order = new Order(Guid.NewGuid(), customer, list);
         _orders[order.Id] = order;
@@ -29,7 +31,7 @@ public class OrderService
     public decimal Total(Order order)
     {
         var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
-        return Math.Round(subtotal, 2);
+        return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
     }
     // @end-snippet
 
