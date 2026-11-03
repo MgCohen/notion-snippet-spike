@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code snippet</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+body{margin:0;background:#f7f6f3;font-family:system-ui,sans-serif}
+#bar{display:flex;gap:12px;align-items:center;padding:6px 10px;border-bottom:1px solid #e3e2de;font-size:12px}
+#bar a{color:#37352f;font-family:ui-monospace,Consolas,monospace}
+#bar span{color:#787774;margin-left:auto;white-space:nowrap}
+#code{overflow-x:auto;font-family:ui-monospace,Consolas,monospace;line-height:1.5}
+table{border-collapse:collapse}td{padding:0 10px;white-space:pre;vertical-align:top}
+td.n{color:#9b9a97;text-align:right;user-select:none;border-right:1px solid #e3e2de}
+.err{color:#d44c47;padding:10px}
+</style></head><body>
+<div id="bar"><a id="src" target="_blank" rel="noopener"></a><span id="info">loading</span></div>
+<div id="code"></div>
+<script>
+// Live code viewer for a Notion embed. The URL sets the snippet:
+// ?repo=owner/name&ref=main&path=src/file.cs  plus  &lines=10-20  or  &snippet=<name>  (none: whole file)
+const q = new URLSearchParams(location.search);
+const repo = q.get("repo") || "MgCohen/notion-snippet-spike", ref = q.get("ref") || "main", path = q.get("path");
+const LANG = { cs: "csharp", ts: "typescript", js: "javascript", py: "python", json: "json", yml: "yaml", md: "markdown" };
+const fail = (t) => document.getElementById("code").innerHTML = `<div class="err">${t}</div>`;
+
+function select(lines) {
+  if (q.get("lines")) {
+    const [a, b = a] = q.get("lines").split("-").map(Number);
+    return { start: a, end: Math.min(b, lines.length) };
+  }
+  if (q.get("snippet")) {
+    const name = q.get("snippet");
+    const s = lines.findIndex((l) => new RegExp(`@snippet:\\s*${name}\\b`).test(l));
+    if (s < 0) throw new Error(`No "@snippet: ${name}" marker in the file.`);
+    const e = lines.findIndex((l, i) => i > s && /@end-snippet/.test(l));
+    return { start: s + 2, end: e < 0 ? lines.length : e };
+  }
+  return { start: 1, end: lines.length };
+}
+
+// Scale the font so the longest line fits the width (13 px to 8 px). Below 8 px it scrolls.
+function fit(longest) {
+  const width = document.getElementById("code").clientWidth - 70;
+  document.getElementById("code").style.fontSize = Math.max(8, Math.min(13, width / (longest * 0.6))) + "px";
+}
+
+if (!path) fail("Add ?path=src/file.cs to the URL.");
+else fetch(`https://raw.githubusercontent.com/${repo}/${ref}/${path}`, { cache: "no-store" })
+  .then((r) => r.ok ? r.text() : Promise.reject(`GitHub answered ${r.status}`))
+  .then((text) => {
+    const lines = text.replace(/\r/g, "").split("\n");
+    const r = select(lines);
+    const part = lines.slice(r.start - 1, r.end);
+    const cut = Math.min(...part.filter((l) => l.trim()).map((l) => l.match(/^\s*/)[0].length));
+    const body = part.map((l) => l.slice(cut)).join("\n");
+    const lang = LANG[path.split(".").pop()];
+    const html = (lang ? hljs.highlight(body, { language: lang }).value : body.replace(/</g, "&lt;")).split("\n");
+    document.getElementById("code").innerHTML = "<table>" + html.map((h, i) => `<tr><td class="n">${r.start + i}</td><td>${h || " "}</td></tr>`).join("") + "</table>";
+    const a = document.getElementById("src");
+    a.href = `https://github.com/${repo}/blob/${ref}/${path}#L${r.start}-L${r.end}`;
+    a.textContent = `${path}#L${r.start}-L${r.end}`;
+    document.getElementById("info").textContent = `${repo}@${ref}`;
+    const longest = Math.max(...body.split("\n").map((l) => l.length));
+    fit(longest);
+    addEventListener("resize", () => fit(longest));
+  })
+  .catch((e) => fail(String(e)));
+</script></body></html>
