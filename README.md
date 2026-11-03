@@ -11,7 +11,7 @@ Notion test page: [Spike: live GitHub code in Notion](https://www.notion.so/40c9
 | Question | A: emgithub embed | B: native code block | C: HTML block |
 |---|---|---|---|
 | 1. Setup | 1 min. Public repo only | Action, token, database | Same Action as B |
-| 2. Partial region | Fixed line range in the URL | Range, symbol, marker, file | Same selectors as B |
+| 2. Partial region | Fixed line range in the URL | Range, method, file | Same properties as B |
 | 3. Line numbers | Real, in the frame | Caption range, or in the text | Real, in a column |
 | 4. Look in Notion | Frame, scroll inside | Native block, no scroll | Frame, scroll, colors |
 | 5. Refresh | Page view, 2.5 min after push | Action, 20 s after merge | Action, by API (tested: 1.3 s) |
@@ -54,7 +54,7 @@ Test: commit `9c420b3` added 2 lines above `Create` and changed one line in `Tot
 | A5 emgithub, range on `main` | Line range | 2 min 28 s (CDN cache, 5 min maximum) | None. Range drifts: wrong lines after the push | AI only |
 | A6 emgithub, fixed commit | Line range | Never | Edit the URL by hand for each change | AI only |
 | A7 emgithub, whole file | Whole file, scroll | 2 min 28 s | None | AI only |
-| B Action, registry | Range, symbol, marker, file | 22 s | None. 1 API call, plus 2 for each changed block | Search, AI, MCP |
+| B Action, registry | Range, method, file | 22 s | None. 1 API call, plus 2 for each changed block | Search, AI, MCP |
 
 - No option needs an agent. Only A2 and A6 need a manual step.
 - B runs on GitHub Actions: free minutes on a public repo, about 1 billed minute for each push on a private repo.
@@ -124,8 +124,11 @@ Each row is one Notion code block. A person writes the input. The Action writes 
 
 | Property | Written by | Example |
 |---|---|---|
-| Selector | Person | `lines 19-30`, `symbol OrderService.Total` |
-| Path | Person (Action for `snippet`) | `src/OrderService.cs` |
+| File | Person | `https://github.com/MgCohen/notion-snippet-spike/blob/main/src/OrderService.cs` |
+| Method, Overload | Person | `OrderService.Total`, `2` |
+| Start line, End line | Person (Action when the range moves) | `19`, `30` |
+| Lines before, Lines after | Person | `3`, `2` |
+| Max lines, Line numbers | Person | `12`, checked |
 | Status, Message | Action | `In sync`, or `Error` with the reason |
 | Hash, Block ID | Action | `76440fc9f43a18c5`, ID of the code block |
 | Region, Commit | Action | `L19-L30` and `a9fcaa5`, both links to GitHub |
@@ -134,28 +137,35 @@ The code block is the first code block on the row page. Doc pages show it with a
 
 ![Doc page: synced code block with caption and permalink](docs/screenshots/b-doc-page-synced.jpg)
 
-![The registry: Selector, Status and Region for each code block](docs/screenshots/registry-table.jpg)
+![The registry: Status and Region for each code block](docs/screenshots/registry-table.jpg)
 
-### Selectors
+### Code selection
 
-| Selector | Selects | Follows code changes |
+[`scripts/snippet-range.mjs`](scripts/snippet-range.mjs) finds the lines from the row properties. [`scripts/snippet-range.test.mjs`](scripts/snippet-range.test.mjs) has the tests (`node --test scripts/snippet-range.test.mjs`).
+
+| Properties | Selects | Follows code changes |
 |---|---|---|
-| `lines 16-27` | Line range | Yes, by the git diff since the last sync |
-| `lines 16-27 @f60adb7` | Line range at a fixed commit | No, it never changes |
-| `file` | Whole file | Yes |
-| `symbol OrderService.Total` | Class, record or method | Yes, by name |
-| `snippet create-order` | `// @snippet:` to `// @end-snippet` | Yes, by marker |
+| Method `OrderService.Total` | The declaration: method, property, field or type | Yes, by name |
+| Method `Total`, Overload `2` | The second declaration named `Total` | Yes, by name |
+| Start line `16`, End line `27` | Line range | Yes, by the git diff since the last sync |
+| File with a commit, Start line, End line | Line range at a fixed commit | No, it never changes |
+| No Method and no lines | Whole file | Yes |
 
-Options after a selector:
+- If Method has a value, the Action ignores Start line and End line.
+- Lines before and Lines after add lines on each side, with a method or with a line range.
+- Rows with a File in a different repo are skipped. One Snippets database can serve many repos, and each repo has its own Action.
+- The method search masks comments and strings, and skips calls. It reads C#, TypeScript and JavaScript.
 
-- `max 12`: shows the first 12 lines, then `// ... 14 more lines, see the caption link`. Notion code blocks have no height limit or scroll.
-- `numbers`: puts the real file line numbers in the code text.
+Display options:
 
-The `lines` selector follows the code. Before each sync, the script reads `git diff` from the commit of the last sync. If lines above the range change, the range moves, and the Action writes the new `Selector`. If the diff touches the range, the summary says "edited".
+- Max lines `12`: shows the first 12 lines, then `// ... 14 more lines, see the caption link`. Notion code blocks have no height limit or scroll.
+- Line numbers: puts the real file line numbers in the code text.
+
+A line range follows the code. Before each sync, the script reads `git diff` from the commit of the last sync. If lines above the range change, the range moves, and the Action writes the new Start line and End line. If the diff touches the range, the summary says "edited".
 
 ![Line range L16-L27 moved to L19-L30 after a merge](docs/screenshots/range-moved.jpg)
 
-![symbol OrderService with max 12 and numbers](docs/screenshots/symbol-class-max-lines.jpg)
+![OrderService with Max lines 12 and Line numbers](docs/screenshots/symbol-class-max-lines.jpg)
 
 ### Change detection
 
@@ -166,11 +176,11 @@ The hash is for one row only: language, `path#Lx-Ly` and the selected code text.
 | Other file, or other region of the same file | No write | 0 |
 | Code of the region | Write block and row | 2 |
 | Lines above the region only | Write: the caption range changed | 2 |
-| Selector finds no code | `Status` = Error, run fails | 1, then 0 while the error stays |
+| Row finds no code | `Status` = Error, run fails | 1, then 0 while the error stays |
 
 Each run also does 1 database query for each 100 rows.
 
-![A selector that finds no code: Status Error with the reason](docs/screenshots/error-row.jpg)
+![A row that finds no code: Status Error with the reason](docs/screenshots/error-row.jpg)
 
 ### Triggers
 
@@ -190,7 +200,7 @@ A Notion button that starts the workflow (`repository_dispatch`) is possible, bu
 | [41487744189](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41487744189) | First registry run | 9 new | 31 (finds block IDs) |
 | [41488112900](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488112900) | [PR #1](https://github.com/MgCohen/notion-snippet-spike/pull/1) plan | 8 will update, 1 unchanged | 1 |
 | [41488181759](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488181759) | Merge of PR #1 | 8 updated, 1 unchanged, 18 s | 17 |
-| [41488311983](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488311983) | Manual, 1 bad selector | 9 unchanged, 1 error | 2 |
+| [41488311983](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488311983) | Manual, 1 bad row | 9 unchanged, 1 error | 2 |
 | [41488890457](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41488890457) | Push of README only | 9 unchanged, 1 known error | 1 |
 | [41489969135](https://github.com/MgCohen/notion-snippet-spike/actions/runs/41489969135) | Push `9c420b3`, all options test | 8 updated, 22 s | 17 |
 
@@ -240,7 +250,7 @@ No known tool writes a code region into a native Notion code block (search of No
 3. Run `gh secret set NOTION_TOKEN -R <owner>/<repo>`. Do not commit the token.
 4. Copy `scripts/sync-snippets.mjs` and `.github/workflows/notion-snippets.yml` into the repo.
 5. Write the repo name and the database ID in `notion-snippets.json`.
-6. For each code block, add a row with `Selector`, `Path` and an empty code block.
+6. For each code block, add a row with `File`, a `Method` or a line range, and an empty code block.
 7. Run `gh workflow run notion-snippets.yml -f mode=plan` to see the result first.
 
 ## Limits and open points
@@ -249,12 +259,11 @@ Found by an independent audit of this report, not yet fixed:
 
 - A row with an error fails the run one time only. Later runs show "error (known)" and succeed.
 - An insert directly after the last line of a `lines` range makes the range grow. Ranges do not follow a file rename.
-- The `symbol` parser can select a call line above the declaration, and it cannot select properties or overloads by signature.
+- The method search cannot select an overload by signature, only by its position (Overload).
 - Many rows on one file: lines added at the top rewrite all of them (2 calls each). Not tested against the Notion rate limit.
 - The native Notion GitHub link preview (OAuth, private repos) was not tested.
 
 - Do not edit a synced code block in Notion. The next change of that row replaces the edit.
-- The `symbol` selector reads C#-like syntax with a simple parser. Roslyn is more correct for C#.
-- C# `#region name` blocks are not a selector yet. A small change to the marker pattern can add them.
-- Notion makes `OrderService.Total` in a text property a link. The script reads the plain text, so the selector still works.
+- The method search reads C-like syntax with a small parser. It does not read JavaScript regex literals with braces, tuple return types, or arrow functions without a semicolon. Roslyn or tree-sitter is more correct.
+- Notion makes `OrderService.Total` in a text property a link. The script reads the plain text, so the method still works.
 - The Notion token was shared in a chat. Rotate it in the Notion integration settings, then run `gh secret set NOTION_TOKEN` again.

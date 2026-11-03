@@ -1,6 +1,6 @@
 // Keeps native Notion code blocks equal to code in this repo.
 // The registry is the Notion "Snippets" database: one row for each code block.
-// No dependencies: Node 20+ (global fetch).
+// No dependencies: Node 22+ (global fetch).
 //
 //   node scripts/sync-snippets.mjs           apply: write the blocks that changed
 //   node scripts/sync-snippets.mjs --plan    list what would change, write nothing
@@ -8,19 +8,23 @@
 //   node scripts/sync-snippets.mjs --local   resolve rows from notion-rows.json, no API (test)
 //
 // Row input (database properties):
-//   Selector  lines 16-27 | file | symbol Outer.Inner | snippet name
-//             options: @<commit>  max <n>  numbers
-//   Path      the file, for lines, file and symbol
-// Row output: Status, Message, Hash, Block ID, Path (snippet), Region, Language, Commit, Updated.
+//   File                    GitHub file link: https://github.com/<owner>/<repo>/blob/<ref>/<path>
+//                           A commit as <ref> pins the code. Rows of other repos are skipped.
+//   Method                  declaration to show, for example Total or OrderService.Total
+//   Overload                which declaration, if more than one has the name (default 1)
+//   Start line, End line    the range, if Method is empty. All empty: the whole file
+//   Lines before, after     lines to add on each side
+//   Max lines, Line numbers display options
+// Row output: Status, Message, Hash, Block ID, Region, Language, Commit, Updated.
+// A line range moves with the git diff, and the run writes the new Start line and End line.
 // The page of the row holds the code block: the first code block, also inside a synced block.
 
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
+import { snippetRange } from "./snippet-range.mjs";
 
 const NOTION_VERSION = "2022-06-28";
-const START = /^\s*(?:\/\/|#|--)\s*@snippet:\s*([\w.-]+)\s*$/;
-const END = /^\s*(?:\/\/|#|--)\s*@end-snippet\s*$/;
 const LANGUAGES = { cs: "c#", js: "javascript", mjs: "javascript", ts: "typescript", py: "python", sql: "sql", json: "json" };
 
 const args = new Set(process.argv.slice(2));
@@ -28,93 +32,23 @@ const mode = args.has("--plan") ? "plan" : args.has("--local") ? "local" : "appl
 const force = args.has("--force");
 const config = JSON.parse(readFileSync("notion-snippets.json", "utf8"));
 const repo = process.env.GITHUB_REPOSITORY ?? config.repo;
+const branch = config.branch ?? "main";
 const sha = process.env.GITHUB_SHA ?? execSync("git rev-parse HEAD").toString().trim();
 const token = process.env.NOTION_TOKEN;
 let apiCalls = 0;
 
 // ---------- Code selection ----------
 
-function readLines(path, ref) {
-  const text = ref ? execSync(`git show ${ref}:${path}`, { encoding: "utf8" }) : readFileSync(path, "utf8");
-  return text.replace(/\r?\n$/, "").split(/\r?\n/);
+function parseFile(url) {
+  const m = url?.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/([^?#]+)$/);
+  if (!m) throw new Error(`File must be a GitHub file link, not "${url}"`);
+  return { repo: m[1], ref: m[2], path: decodeURIComponent(m[3]), pinned: /^[0-9a-f]{7,40}$/.test(m[2]) };
 }
 
-function findMarkers() {
-  const regions = new Map();
-  const files = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean);
-  for (const path of files) {
-    if (path.startsWith("scripts/") || path.endsWith(".md")) continue;
-    let lines;
-    try { lines = readLines(path); } catch { continue; }
-    let open = null;
-    lines.forEach((line, i) => {
-      const start = line.match(START);
-      if (start) { open = { name: start[1], from: i + 2 }; return; }
-      if (open && END.test(line)) {
-        if (regions.has(open.name)) throw new Error(`Snippet "${open.name}" is defined two times.`);
-        regions.set(open.name, { path, from: open.from, to: i });
-        open = null;
-      }
-    });
-    if (open) throw new Error(`Snippet "${open.name}" in ${path} has no @end-snippet.`);
-  }
-  return regions;
-}
-
-// Finds a C#-like declaration and its end. "Outer.Inner" searches Inner inside Outer.
-function findSymbol(lines, symbol) {
-  let from = 1, to = lines.length;
-  for (const name of symbol.split(".")) {
-    const range = findDeclaration(lines, name, from, to);
-    if (!range) throw new Error(`symbol "${name}" not found`);
-    [from, to] = range;
-  }
-  // Keep the doc comments and attributes above the declaration.
-  while (from > 1 && /^\s*(\/\/\/|\[)/.test(lines[from - 2])) from--;
-  return [from, to];
-}
-
-function findDeclaration(lines, name, from, to) {
-  const type = new RegExp(`\\b(class|record|struct|interface|enum)\\s+${name}\\b`);
-  const member = new RegExp(`^\\s*(?:[\\w<>\\[\\],?]+\\s+)+${name}\\s*(?:<[^>]*>)?\\s*\\(`);
-  for (let i = from - 1; i < to; i++) {
-    const line = lines[i];
-    if (/^\s*\/\//.test(line) || /\bnew\s/.test(line.split(name)[0])) continue;
-    if (type.test(line) || member.test(line)) return [i + 1, findEnd(lines, i)];
-  }
-  return null;
-}
-
-// Strings, chars and comments do not count for braces.
-function findEnd(lines, start) {
-  let depth = 0, opened = false, arrow = false;
-  for (let i = start; i < lines.length; i++) {
-    const code = lines[i].replace(/\/\/.*$/, "").replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'(?:[^'\\]|\\.)*'/g, "''");
-    for (let c = 0; c < code.length; c++) {
-      const ch = code[c];
-      if (ch === "=" && code[c + 1] === ">" && depth === 0 && !opened) arrow = true;
-      if (ch === "{") { depth++; opened = true; }
-      else if (ch === "}") { depth--; if (opened && depth === 0) return i + 1; }
-      else if (ch === ";" && depth === 0 && (arrow || !opened)) return i + 1;
-    }
-  }
-  return lines.length;
-}
-
-// "symbol OrderService max 12 numbers" -> { kind, arg, ref, maxLines, lineNumbers }
-function parseSelector(selector) {
-  const words = selector.trim().split(/\s+/);
-  const s = { kind: words.shift() };
-  if (!["lines", "file", "symbol", "snippet"].includes(s.kind)) throw new Error(`unknown selector "${selector}"`);
-  if (s.kind !== "file") s.arg = words.shift();
-  while (words.length) {
-    const w = words.shift();
-    if (w.startsWith("@")) s.ref = w.slice(1);
-    else if (w === "max") s.maxLines = Number(words.shift());
-    else if (w === "numbers") s.lineNumbers = true;
-    else throw new Error(`unknown option "${w}" in "${selector}"`);
-  }
-  return s;
+// The default branch is the checkout, so a pull request plan shows the code of the pull request.
+function readFile({ ref, path, pinned }) {
+  if (ref === branch) return readFileSync(path, "utf8");
+  return execSync(`git show ${pinned ? ref : `origin/${ref}`}:${path}`, { encoding: "utf8" });
 }
 
 // Moves a line range by the git diff from the last synced commit to now.
@@ -135,30 +69,22 @@ function followRange(path, from, to, since) {
   return { from: from + shift, to: to + shift + grow, edited };
 }
 
-function resolve(row, markers) {
-  const s = parseSelector(row.selector);
-  let path = row.path, from = 1, to, all;
-  if (s.kind === "snippet") {
-    const m = markers.get(s.arg);
-    if (!m) throw new Error(`no @snippet "${s.arg}" in the code`);
-    ({ path, from, to } = m);
-    all = readLines(path);
-  } else {
-    if (!path) throw new Error("Path is empty");
-    all = readLines(path, s.ref);
-    to = all.length;
-    if (s.kind === "lines") {
-      [from, to] = s.arg.split("-").map(Number);
-      const moved = s.ref ? null : followRange(path, from, to, row.commit);
-      if (moved && (moved.from !== from || moved.to !== to || moved.edited)) {
-        s.follow = { old: `${from}-${to}`, edited: moved.edited };
-        ({ from, to } = moved);
-        s.newSelector = row.selector.replace(/^lines\s+\d+-\d+/, `lines ${from}-${to}`);
-      }
-      if (!(from >= 1 && to >= from && to <= all.length)) throw new Error(`lines ${s.arg} not in ${path} (${all.length} lines)`);
-    } else if (s.kind === "symbol") [from, to] = findSymbol(all, s.arg);
+function resolve(row) {
+  const file = parseFile(row.file);
+  const source = readFile(file);
+  const all = source.replace(/\r?\n$/, "").split(/\r?\n/);
+  let { start, end } = row;
+  let follow;
+  if (!row.method && start && file.ref === branch) {
+    const to = end ?? all.length;
+    const moved = followRange(file.path, start, to, row.commit);
+    if (moved && (moved.from !== start || moved.to !== to || moved.edited)) {
+      follow = { old: `${start}-${to}`, edited: moved.edited };
+      ({ from: start, to: end } = moved);
+    }
   }
-  return { ...s, path, from, to, all };
+  const range = snippetRange(source, { method: row.method || undefined, overload: row.overload, start, end, before: row.before, after: row.after });
+  return { ...row, ...file, commit: file.pinned ? file.ref : sha, from: range.start, to: range.end, all, follow, start, end };
 }
 
 function dedent(lines) {
@@ -169,11 +95,9 @@ function dedent(lines) {
 
 // Code text, caption and hash for one region.
 function render(r) {
-  const commit = r.ref ?? sha;
   const language = LANGUAGES[r.path.split(".").pop()] ?? "plain text";
-  // Keep the real line number with each line, and drop the marker comments.
-  const body = dedent(r.all.slice(r.from - 1, r.to));
-  let rows = body.map((text, i) => ({ n: r.from + i, text })).filter((x) => !START.test(x.text) && !END.test(x.text));
+  // Keep the real line number with each line.
+  let rows = dedent(r.all.slice(r.from - 1, r.to)).map((text, i) => ({ n: r.from + i, text }));
   const hidden = r.maxLines && rows.length > r.maxLines ? rows.length - r.maxLines : 0;
   if (hidden) rows = rows.slice(0, r.maxLines);
   const width = String(rows.at(-1)?.n ?? 0).length;
@@ -181,14 +105,23 @@ function render(r) {
   if (hidden) text += `\n// ... ${hidden} more lines, see the caption link`;
 
   const anchor = `${r.path}#L${r.from}-L${r.to}`;
-  const permalink = `https://github.com/${repo}/blob/${commit}/${anchor}`;
+  const permalink = `https://github.com/${r.repo}/blob/${r.commit}/${anchor}`;
   const caption = [
     { type: "text", text: { content: anchor, link: { url: permalink } } },
-    { type: "text", text: { content: ` @ ${commit.slice(0, 7)}` } },
+    { type: "text", text: { content: ` @ ${r.commit.slice(0, 7)}` } },
   ];
   // The commit is not in the hash: a push that does not change the code changes nothing.
   const hash = createHash("sha256").update(`${language}\n${anchor}\n${text}`).digest("hex").slice(0, 16);
-  return { text, caption, language, permalink, commit, anchor, hash };
+  return { text, caption, language, permalink, anchor, hash };
+}
+
+// "OrderService.Total", "L21-L32" or "file", for the report.
+function describe(row) {
+  const where = row.method
+    ? `${row.method}${row.overload > 1 ? ` (${row.overload})` : ""}`
+    : row.start ? `L${row.start}-L${row.end ?? "end"}` : "file";
+  const pad = [row.before && `B${row.before}`, row.after && `A${row.after}`].filter(Boolean).join(" ");
+  return pad ? `${where} ${pad}` : where;
 }
 
 // ---------- Notion ----------
@@ -209,6 +142,7 @@ async function notion(method, path, body) {
 }
 
 const plain = (p) => (p?.rich_text ?? p?.title ?? []).map((t) => t.plain_text).join("");
+const number = (p) => p?.number ?? undefined;
 const text = (content, url) => ({ rich_text: content ? [{ type: "text", text: { content, link: url ? { url } : null } }] : [] });
 
 async function readRegistry() {
@@ -219,7 +153,9 @@ async function readRegistry() {
     for (const p of page.results) {
       const pr = p.properties;
       rows.push({
-        id: p.id, name: plain(pr.Name), selector: plain(pr.Selector), path: plain(pr.Path),
+        id: p.id, name: plain(pr.Name), file: pr.File?.url ?? undefined, method: plain(pr.Method).trim(), overload: number(pr.Overload),
+        start: number(pr["Start line"]), end: number(pr["End line"]), before: number(pr["Lines before"]), after: number(pr["Lines after"]),
+        maxLines: number(pr["Max lines"]), lineNumbers: pr["Line numbers"]?.checkbox ?? false,
         commit: plain(pr.Commit), hash: plain(pr.Hash), blockId: plain(pr["Block ID"]), status: pr.Status?.select?.name, message: plain(pr.Message),
       });
     }
@@ -263,15 +199,16 @@ async function writeBlock(row, r) {
 
 // ---------- Run ----------
 
-const markers = findMarkers();
 const rows = mode === "local" ? JSON.parse(readFileSync("notion-rows.json", "utf8")) : (token ? await readRegistry() : null);
 if (!rows) throw new Error("NOTION_TOKEN is not set.");
 
 const results = [];
 for (const row of rows) {
-  if (!row.selector) { results.push({ row, result: "skipped", note: "Selector is empty" }); continue; }
+  if (!row.file) { results.push({ row, result: "skipped", note: "File is empty" }); continue; }
+  const other = row.file.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\//)?.[1];
+  if (other && other.toLowerCase() !== repo.toLowerCase()) { results.push({ row, result: "skipped", note: `File is in ${other}` }); continue; }
   let r, region;
-  try { region = resolve(row, markers); r = render(region); }
+  try { region = resolve(row); r = render(region); }
   catch (e) { r = null; region = { error: e.message }; }
 
   if (!r) {
@@ -282,10 +219,10 @@ for (const row of rows) {
     results.push({ row, result, note: region.error });
     continue;
   }
-  const changed = force || r.hash !== row.hash || row.status !== "In sync";
+  const changed = force || r.hash !== row.hash || row.status !== "In sync" || region.follow;
   const f = region.follow;
   const note = f ? `${r.anchor} (range ${f.edited ? "edited" : "moved"}, was ${f.old})` : r.anchor;
-  if (mode === "local") { console.log(`--- ${row.name} [${row.selector}] ${note} ${r.hash}\n${r.text}`); continue; }
+  if (mode === "local") { console.log(`--- ${row.name} [${describe(row)}] ${note} ${r.hash}\n${r.text}`); continue; }
   if (!changed) { results.push({ row, result: "unchanged", note }); continue; }
   if (mode === "plan") { results.push({ row, result: row.hash ? "will update" : "new", note }); continue; }
 
@@ -293,17 +230,15 @@ for (const row of rows) {
     const blockId = await writeBlock(row, r);
     await notion("PATCH", `/pages/${row.id}`, {
       properties: {
-        Repo: { url: `https://github.com/${repo}` },
-        Path: text(region.path),
         Region: text(`L${region.from}-L${region.to}`, r.permalink),
         Language: { select: { name: r.language } },
-        Commit: text(r.commit.slice(0, 7), `https://github.com/${repo}/commit/${r.commit}`),
+        Commit: text(region.commit.slice(0, 7), `https://github.com/${region.repo}/commit/${region.commit}`),
         Updated: { date: { start: new Date().toISOString() } },
         Hash: text(r.hash),
         "Block ID": text(blockId),
         Status: { select: { name: "In sync" } },
         Message: text(""),
-        ...(region.newSelector ? { Selector: text(region.newSelector) } : {}),
+        ...(f ? { "Start line": { number: region.start }, "End line": { number: region.end } } : {}),
       },
     });
     results.push({ row, result: row.hash ? "updated" : "new", note });
@@ -321,9 +256,9 @@ const summary = [
   "",
   Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ") + `, ${apiCalls} Notion API calls`,
   "",
-  "| Snippet | Selector | Result | Region or error |",
+  "| Snippet | Source | Result | Region or error |",
   "|---|---|---|---|",
-  ...results.map((x) => `| ${x.row.name} | \`${x.row.selector}\` | ${x.result} | ${x.note.replace(/\|/g, "\\|")} |`),
+  ...results.map((x) => `| ${x.row.name} | \`${describe(x.row)}\` | ${x.result} | ${x.note.replace(/\|/g, "\\|")} |`),
 ].join("\n");
 console.log(summary);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + "\n");

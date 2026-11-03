@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # "@<commit>" selectors read older commits
+          fetch-depth: 0 # pinned File links and moved line ranges read older commits
       - uses: actions/setup-node@v4
         with:
           node-version: 22
