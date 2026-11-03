@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+body{margin:0;font:13px ui-monospace,Consolas,monospace;background:#f7f6f3}
+#bar{display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid #e3e2de;font-family:system-ui;font-size:12px;color:#555}
+#box{max-height:420px;overflow:auto}
+table{border-collapse:collapse}td{padding:0 8px;white-space:pre;vertical-align:top}
+td.n{color:#999;text-align:right;user-select:none;border-right:1px solid #e3e2de}
+#status{margin-left:auto}
+</style></head><body>
+<div id="bar"><select id="pick"></select><a id="src" target="_blank"></a><span id="status">loading</span></div>
+<div id="box"><table id="code"></table></div>
+<script>
+// Config for this block. The file is read live from GitHub, through jsDelivr, at each view.
+const CFG = { repo: "MgCohen/notion-snippet-spike", ref: "main", path: "src/OrderService.cs", snippet: "order-total" };
+const key = "pick:" + location.pathname;
+const status = (t) => document.getElementById("status").textContent = t;
+let saved = null; try { saved = localStorage.getItem(key); } catch (e) { saved = "storage blocked: " + e.name; }
+
+// The HTML block allows connect-src only to CDNs. jsDelivr serves public GitHub files.
+fetch(`https://cdn.jsdelivr.net/gh/${CFG.repo}@${CFG.ref}/${CFG.path}`)
+  .then(r => r.ok ? r.text() : Promise.reject("jsDelivr " + r.status))
+  .then(text => {
+    const lines = text.replace(/\r/g, "").split("\n");
+    const regions = {};
+    lines.forEach((l, i) => {
+      const m = l.match(/@snippet:\s*([\w-]+)/); if (m) regions[m[1]] = { start: i + 2 };
+      const e = l.match(/@end-snippet/); if (e) { const open = Object.values(regions).find(r => !r.end); if (open) open.end = i; }
+    });
+    const pick = document.getElementById("pick");
+    ["(whole file)", ...Object.keys(regions)].forEach(n => pick.add(new Option(n, n)));
+    pick.value = (saved && (saved in regions || saved === "(whole file)")) ? saved : CFG.snippet;
+    const show = () => {
+      const r = regions[pick.value] || { start: 1, end: lines.length };
+      const body = lines.slice(r.start - 1, r.end).join("\n");
+      const html = hljs.highlight(body, { language: "csharp" }).value.split("\n");
+      document.getElementById("code").innerHTML = html.map((h, i) => `<tr><td class="n">${r.start + i}</td><td>${h || " "}</td></tr>`).join("");
+      const a = document.getElementById("src");
+      a.href = `https://github.com/${CFG.repo}/blob/${CFG.ref}/${CFG.path}#L${r.start}-L${r.end}`;
+      a.textContent = `${CFG.path}#L${r.start}-L${r.end}`;
+      try { localStorage.setItem(key, pick.value); } catch (e) {}
+    };
+    pick.onchange = show; show();
+    status("live jsDelivr OK | saved pick: " + (saved || "none"));
+  })
+  .catch(e => status("fetch failed: " + e));
+</script></body></html>

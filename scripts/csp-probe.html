@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>body{font:12px Consolas,monospace;margin:8px}div{white-space:pre-wrap;margin:2px 0}</style></head><body>
+<div id="out"></div>
+<script>
+// Probe: which network sources the Notion HTML block allows.
+const out = (t) => { const d = document.createElement("div"); d.textContent = t; document.getElementById("out").appendChild(d); };
+out("origin: " + location.origin);
+let policy = false;
+document.addEventListener("securitypolicyviolation", (e) => {
+  out(`CSP blocked ${e.blockedURI} (${e.effectiveDirective})`);
+  if (!policy) { policy = true; out("POLICY: " + e.originalPolicy); }
+});
+const file = "MgCohen/notion-snippet-spike/main/src/OrderService.cs";
+const fetches = {
+  "raw.githubusercontent": `https://raw.githubusercontent.com/${file}`,
+  "jsdelivr gh": "https://cdn.jsdelivr.net/gh/MgCohen/notion-snippet-spike@main/src/OrderService.cs",
+  "api.github.com": "https://api.github.com/repos/MgCohen/notion-snippet-spike/contents/src/OrderService.cs",
+  "cdnjs": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js",
+};
+for (const [n, u] of Object.entries(fetches))
+  fetch(u).then(r => r.text()).then(t => out(`fetch ${n}: OK ${t.length} chars`)).catch(e => out(`fetch ${n}: FAIL ${e}`));
+const scripts = {
+  "jsdelivr gh script": "https://cdn.jsdelivr.net/gh/MgCohen/notion-snippet-spike@main/README.md",
+  "unpkg script": "https://unpkg.com/react@18.3.1/umd/react.production.min.js",
+  "api.github.com jsonp": "https://api.github.com/repos/MgCohen/notion-snippet-spike/contents/src/OrderService.cs?callback=cb",
+  "gist script": "https://gist.github.com/MgCohen/9fc74392d1371c79055e21b2584b2f47.js",
+};
+window.cb = () => out("jsonp callback ran");
+for (const [n, u] of Object.entries(scripts)) {
+  const s = document.createElement("script"); s.src = u;
+  s.onload = () => out(`script ${n}: loaded`); s.onerror = () => out(`script ${n}: FAIL`);
+  document.head.appendChild(s);
+}
+try { localStorage.setItem("p", "1"); out("localStorage: OK"); } catch (e) { out("localStorage: FAIL " + e.name); }
+</script></body></html>
