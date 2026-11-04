@@ -49,7 +49,8 @@ class Notion:
                     return json.load(response)
             except urllib.error.HTTPError as e:
                 if (e.code == 429 or e.code >= 500) and attempt < 3:
-                    time.sleep(float(e.headers.get("Retry-After") or attempt + 1))
+                    wait = e.headers.get("Retry-After") or ""
+                    time.sleep(float(wait) if wait.isdigit() else attempt + 1)
                     continue
                 try:
                     error = json.load(e)
@@ -154,6 +155,8 @@ def resolve(row, head):
             new_start, new_end, edited = follow_range(git("diff", "-U0", row["since"], head, "--", path), start, end)
         except ValueError:
             new_start, new_end, edited = start, end, False
+        if new_end < new_start:
+            raise ValueError(f"The lines {start}-{end} were deleted.")
         if (new_start, new_end) != (start, end) or edited:
             moved = f"{'edited' if edited else 'moved'}, was {start}-{end}"
             start, end = new_start, new_end
