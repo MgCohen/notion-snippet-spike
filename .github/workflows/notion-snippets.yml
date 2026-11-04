@@ -28,10 +28,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: claude-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: MgCohen/claude-plugins
+          ref: ${{ vars.NOTION_TOOLS_REF || 'main' }}
+          token: ${{ steps.app.outputs.token }}
+          path: .notion-tools
+          sparse-checkout: plugins/notion-context
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python .github/notion-snippets/sync_snippets.py ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode || 'apply' }}
+      - run: python -m notion_context snippets ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode || 'apply' }}
         env:
+          PYTHONPATH: .notion-tools/plugins/notion-context
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_SNIPPETS_DATABASE: ${{ vars.NOTION_SNIPPETS_DATABASE }}

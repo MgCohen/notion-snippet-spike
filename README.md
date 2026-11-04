@@ -113,7 +113,7 @@ flowchart LR
 
 | File | Purpose |
 |---|---|
-| [`.github/notion-snippets/`](.github/notion-snippets/) | Python tools: select code, write Notion blocks. Copy of the `notion-snippets` plugin in [MgCohen/claude-plugins](https://github.com/MgCohen/claude-plugins) |
+| `notion-context` plugin in [MgCohen/claude-plugins](https://github.com/MgCohen/claude-plugins) | Python tools: select code, write Notion blocks. The workflow checks them out |
 | [`.github/workflows/notion-snippets.yml`](.github/workflows/notion-snippets.yml) | Triggers and modes |
 | [`src/OrderService.cs`](src/OrderService.cs) | Sample code |
 
@@ -139,7 +139,7 @@ The code block is the first code block on the row page. Doc pages show it with a
 
 ### Code selection
 
-[`snippet_range.py`](.github/notion-snippets/snippet_range.py) finds the lines from the row properties. The tests are in the plugin.
+`notion_context/snippet_range.py` in the plugin finds the lines from the row properties.
 
 | Properties | Selects | Follows code changes |
 |---|---|---|
@@ -230,8 +230,8 @@ No known tool writes a code region into a native Notion code block (search of No
 1. Make an internal Notion integration with "read content" and "update content".
 2. Connect the integration to the page that holds the Snippets database.
 3. Run `gh secret set NOTION_TOKEN -R <owner>/<repo>`. Do not commit the token.
-4. Copy `tools/snippet_range.py` and `tools/sync_snippets.py` of the plugin to `.github/notion-snippets/`, and `workflow/notion-snippets.yml` to `.github/workflows/`.
-5. Run `gh variable set NOTION_SNIPPETS_DATABASE -R <owner>/<repo> -b <database-id>`.
+4. Copy `workflow/notion-snippets.yml` of the `notion-context` plugin to `.github/workflows/`.
+5. Set the `AUTOMATION_APP_KEY` secret, and the `AUTOMATION_APP_ID` and `NOTION_SNIPPETS_DATABASE` variables. See the plugin README.
 6. For each code block, add a row with `File`, a `Method` or a line range, and an empty code block.
 7. Run `gh workflow run notion-snippets.yml -f mode=plan` to see the result first.
 
