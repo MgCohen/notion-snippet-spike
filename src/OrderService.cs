@@ -21,7 +21,7 @@ public class OrderService
     {
         var list = lines.ToList();
         if (list.Count == 0)
-            throw new ArgumentException("An order needs at least one line.");
+            throw new ArgumentException("An order needs one or more lines.");
         if (list.Any(l => l.Quantity <= 0))
             throw new ArgumentException("Each line needs a positive quantity.");
 
