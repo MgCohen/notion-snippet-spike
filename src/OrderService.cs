@@ -17,7 +17,6 @@ public class OrderService
 
     public int Count => _orders.Count;
 
-    // @snippet: create-order
     public Order Create(string customer, IEnumerable<OrderLine> lines)
     {
         var list = lines.ToList();
@@ -30,9 +29,7 @@ public class OrderService
         _orders[order.Id] = order;
         return order;
     }
-    // @end-snippet
 
-    // @snippet: order-total
     public decimal Total(Order order)
     {
         var subtotal = order.Lines.Sum(l => l.Quantity * l.UnitPrice);
@@ -40,10 +37,7 @@ public class OrderService
             throw new InvalidOperationException($"A total cannot be negative: {subtotal}.");
         return Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
     }
-    // @end-snippet
 
-    // @snippet: find-order
     public Order? Find(Guid id) =>
         _orders.TryGetValue(id, out var order) ? order : null;
-    // @end-snippet
 }
