@@ -5,13 +5,16 @@ TYPE_WORDS = {"class", "struct", "record", "interface", "enum", "namespace", "mo
 VARIABLE_WORDS = {"const", "let", "var"}
 NAME = re.compile(r"[A-Za-z_$][\w$]*")
 PREFIX = re.compile(r"[\w$<>\[\]?,.@\s]*")
-NEXT = re.compile(r"\s*(?:<[^<>()]*>)?\s*(\(|=>|\{|=|;|:)")
+ATTRIBUTES = re.compile(r"^(?:\[[^\[\]]*\]\s*)+")
+NEXT = re.compile(r"\s*(?:<(?:[^<>()]|<[^<>()]*>)*>)?\s*(\(|=>|\{|=|;|:)")
+RAW = re.compile(r'\$*("{3,})')
 
 
 def snippet_range(text, method=None, overload=1, start=None, end=None, before=0, after=0):
+    if overload < 1 or before < 0 or after < 0:
+        raise ValueError("Overload must be 1 or more, and Lines before and Lines after must be 0 or more.")
     src = text.replace("\r", "")
     count = src.count("\n") + (not src.endswith("\n"))
-    clamp = lambda n: min(count, max(1, n))
     if method:
         first, last = find_declaration(mask(src), method, overload)
     else:
@@ -20,7 +23,7 @@ def snippet_range(text, method=None, overload=1, start=None, end=None, before=0,
             raise ValueError(f"Line {first} is outside the file ({count} lines).")
         if first < 1 or last < first:
             raise ValueError(f"Bad line range {first}-{last}.")
-    return clamp(first - before), clamp(last + after)
+    return max(1, first - before), min(count, last + after)
 
 
 def find_declaration(code, method, overload):
@@ -45,10 +48,16 @@ def mask(text):
     out, i, n = [], 0, len(text)
     while i < n:
         pair = text[i : i + 2]
+        raw = RAW.match(text, i)
         if pair == "//":
-            j = end_of(text.find("\n", i), 0, n)
+            j = text.find("\n", i)
+            j = n if j < 0 else j
         elif pair == "/*":
-            j = end_of(text.find("*/", i + 2), 2, n)
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+        elif raw:
+            j = text.find(raw[1], raw.end())
+            j = n if j < 0 else j + len(raw[1])
         elif text.startswith(('@"', '$@"', '@$"'), i):
             j = verbatim_end(text, text.index('"', i) + 1)
         elif text[i] in "\"'`":
@@ -60,10 +69,6 @@ def mask(text):
         out.append(re.sub(r"[^\n]", " ", text[i:j]))
         i = j
     return "".join(out)
-
-
-def end_of(at, length, n):
-    return n if at < 0 else at + length
 
 
 def string_end(text, j, quote):
@@ -95,7 +100,7 @@ def declarations(code, name, lo, hi):
     found = []
     for m in re.compile(rf"(?<![\w$.]){re.escape(name)}(?![\w$])").finditer(code, lo, hi):
         at, after = m.span()
-        prefix = code[code.rfind("\n", 0, at) + 1 : at].strip()
+        prefix = ATTRIBUTES.sub("", code[code.rfind("\n", 0, at) + 1 : at].strip())
         words = prefix.split()
         last = words[-1] if words else None
         nxt = NEXT.match(code, after)
@@ -112,8 +117,8 @@ def declarations(code, name, lo, hi):
             ok = bool(words) or nxt == "("
         if not ok:
             continue
-        kind, end = body_end(code, after)
-        if words or kind != "statement":
+        has_body, end = body_end(code, after)
+        if words or has_body:
             found.append((at, after, min(end, hi - 1)))
     return found
 
@@ -127,17 +132,17 @@ def body_end(code, k):
         elif c in ")]":
             depth -= 1
         elif depth == 0 and c == "{":
-            return "block", closing(code, k)
+            return True, closing(code, k)
         elif depth == 0 and c == ";":
-            return "statement", k
+            return False, k
         elif depth == 0 and code.startswith("=>", k):
-            return "arrow", arrow_end(code, k + 2)
+            return True, arrow_end(code, k + 2)
         elif depth == 0 and c == "}":
-            return "statement", k - 1
+            return False, k - 1
         if depth < 0:
-            return "statement", k - 1
+            return False, k - 1
         k += 1
-    return "statement", len(code) - 1
+    return False, len(code) - 1
 
 
 def arrow_end(code, k):

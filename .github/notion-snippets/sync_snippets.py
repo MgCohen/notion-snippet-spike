@@ -1,4 +1,5 @@
 import argparse
+import collections
 import hashlib
 import json
 import os
@@ -14,14 +15,19 @@ from snippet_range import snippet_range
 
 API = "https://api.notion.com/v1"
 VERSION = "2022-06-28"
-LANGUAGES = {"cs": "c#", "js": "javascript", "mjs": "javascript", "ts": "typescript", "py": "python", "sql": "sql", "json": "json"}
+LANGUAGES = {"cs": "c#", "js": "javascript", "jsx": "javascript", "mjs": "javascript", "ts": "typescript", "tsx": "typescript", "py": "python", "sql": "sql", "json": "json"}
 FILE = re.compile(r"https://github\.com/([^/]+/[^/]+)/blob/([^/]+)/([^?#]+)")
 COMMIT = re.compile(r"[0-9a-f]{7,40}")
-HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@", re.M)
+HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.M)
+CHUNK = 1000
+MAX_CHUNKS = 100
 
 
 def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    run = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+    if run.returncode:
+        raise ValueError(run.stderr.strip() or f"git {args[0]} failed.")
+    return run.stdout
 
 
 class Notion:
@@ -39,14 +45,22 @@ class Notion:
                 headers={"Authorization": f"Bearer {self.token}", "Notion-Version": VERSION, "Content-Type": "application/json"},
             )
             try:
-                with urllib.request.urlopen(request) as response:
+                with urllib.request.urlopen(request, timeout=30) as response:
                     return json.load(response)
             except urllib.error.HTTPError as e:
-                if e.code == 429 and attempt < 3:
+                if (e.code == 429 or e.code >= 500) and attempt < 3:
+                    time.sleep(float(e.headers.get("Retry-After") or attempt + 1))
+                    continue
+                try:
+                    error = json.load(e)
+                except ValueError:
+                    error = {}
+                raise RuntimeError(f"{method} {path} -> {e.code} {error.get('code')}: {error.get('message')}") from None
+            except (urllib.error.URLError, TimeoutError) as e:
+                if attempt < 3:
                     time.sleep(attempt + 1)
                     continue
-                error = json.load(e)
-                raise RuntimeError(f"{method} {path} -> {e.code} {error.get('code')}: {error.get('message')}") from None
+                raise RuntimeError(f"{method} {path} -> {getattr(e, 'reason', e)}") from None
 
 
 def texts(prop):
@@ -73,19 +87,24 @@ def read_rows(notion, database):
         page = notion("POST", f"/databases/{database}/query", {"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
         for p in page["results"]:
             pr = p["properties"]
+            file = (pr.get("File") or {}).get("url") or ""
+            link = FILE.match(file)
             region = texts(pr.get("Region"))
             since = FILE.match(region[0].get("href") or "") if region else None
             rows.append({
                 "id": p["id"],
                 "name": plain(pr.get("Name")),
-                "file": (pr.get("File") or {}).get("url"),
+                "file": file,
+                "repo": link and link[1],
+                "ref": link and link[2],
+                "path": link and urllib.parse.unquote(link[3]),
                 "method": plain(pr.get("Method")).strip(),
                 "overload": number(pr.get("Overload")) or 1,
                 "start": number(pr.get("Start line")),
                 "end": number(pr.get("End line")),
                 "before": number(pr.get("Lines before")) or 0,
                 "after": number(pr.get("Lines after")) or 0,
-                "since": since and since.group(2),
+                "since": since[2] if since and COMMIT.fullmatch(since[2]) else None,
                 "hash": plain(pr.get("Hash")),
                 "status": ((pr.get("Status") or {}).get("select") or {}).get("name"),
                 "message": plain(pr.get("Message")),
@@ -95,64 +114,64 @@ def read_rows(notion, database):
         cursor = page["next_cursor"]
 
 
-def follow_range(path, start, end, since, head):
-    try:
-        diff = git("diff", "-U0", since, head, "--", path)
-    except subprocess.CalledProcessError:
-        return None
-    shift = grow = 0
-    edited = False
+def follow_range(diff, start, end):
+    new_start, new_end, edited = start, end, False
     for m in HUNK.finditer(diff):
-        old_start, old_count = int(m[1]), 1 if m[2] is None else int(m[2])
-        delta = (1 if m[3] is None else int(m[3])) - old_count
-        old_end = old_start if old_count == 0 else old_start + old_count - 1
-        if old_end < start:
-            shift += delta
-        elif old_start <= end:
-            grow += delta
-            edited = True
-    return start + shift, end + shift + grow, edited
+        old, old_count = int(m[1]), 1 if m[2] is None else int(m[2])
+        new, new_count = int(m[3]), 1 if m[4] is None else int(m[4])
+        if old_count == 0:
+            new_start += new_count if old < start else 0
+            new_end += new_count if old < end else 0
+            edited |= start <= old < end
+            continue
+        old_last, first_new = old + old_count - 1, new if new_count else new + 1
+        if old_last < start:
+            new_start += new_count - old_count
+        elif old <= start:
+            new_start = first_new
+        if old_last < end:
+            new_end += new_count - old_count
+        elif old <= end:
+            new_end = first_new + new_count - 1
+        edited |= old <= end and old_last >= start
+    return new_start, new_end, edited
 
 
 def dedent(lines):
-    indents = [len(line) - len(line.lstrip()) for line in lines if line.strip()]
-    cut = min(indents, default=0)
+    cut = min((len(line) - len(line.lstrip()) for line in lines if line.strip()), default=0)
     return [line[cut:] for line in lines]
 
 
 def resolve(row, head):
-    m = FILE.fullmatch(row["file"])
-    if not m:
+    if not row["path"]:
         raise ValueError(f'File must be a GitHub file link, not "{row["file"]}".')
-    repo, ref, path = m[1], m[2], urllib.parse.unquote(m[3])
-    pinned = bool(COMMIT.fullmatch(ref))
-    if pinned:
-        source = git("show", f"{ref}:{path}")
-    else:
-        with open(path, encoding="utf-8") as f:
-            source = f.read()
-    lines = source.replace("\r", "").removesuffix("\n").split("\n")
+    path = row["path"]
+    commit = row["ref"] if COMMIT.fullmatch(row["ref"]) else head
+    source = git("show", f"{commit}:{path}")
     start, end, moved = row["start"], row["end"], None
-    if not row["method"] and start and not pinned and row["since"]:
-        new = follow_range(path, start, end or len(lines), row["since"], head)
-        if new and (new[:2] != (start, end or len(lines)) or new[2]):
-            moved = f"{'edited' if new[2] else 'moved'}, was {start}-{end or len(lines)}"
-            start, end = new[:2]
+    if not row["method"] and start and end and commit == head and row["since"]:
+        try:
+            new_start, new_end, edited = follow_range(git("diff", "-U0", row["since"], head, "--", path), start, end)
+        except ValueError:
+            new_start, new_end, edited = start, end, False
+        if (new_start, new_end) != (start, end) or edited:
+            moved = f"{'edited' if edited else 'moved'}, was {start}-{end}"
+            start, end = new_start, new_end
     first, last = snippet_range(source, row["method"], row["overload"], start, end, row["before"], row["after"])
-    commit = ref if pinned else head
+    lines = source.replace("\r", "").split("\n")
     code = "\n".join(dedent(lines[first - 1 : last]))
-    language = LANGUAGES.get(path.rsplit(".", 1)[-1], "plain text")
-    anchor = f"{path}#L{first}-L{last}"
-    permalink = f"https://github.com/{repo}/blob/{commit}/{anchor}"
+    if len(code) > CHUNK * MAX_CHUNKS:
+        raise ValueError(f"The code has more than {CHUNK * MAX_CHUNKS} characters.")
+    language = LANGUAGES.get(path.rsplit(".", 1)[-1].lower(), "plain text")
+    region = f"L{first}-L{last}"
     return {
-        "repo": repo,
         "code": code,
         "language": language,
-        "anchor": anchor,
-        "permalink": permalink,
+        "anchor": f"{path}#{region}",
+        "region": region,
         "commit": commit,
-        "region": f"L{first}-L{last}",
-        "hash": hashlib.sha256(f"{language}\n{anchor}\n{code}".encode()).hexdigest()[:16],
+        "permalink": f"https://github.com/{row['repo']}/blob/{commit}/{urllib.parse.quote(path)}#{region}",
+        "hash": hashlib.sha256(f"{language}\n{path}#{region}\n{code}".encode()).hexdigest()[:16],
         "moved": moved,
         "start": start,
         "end": end,
@@ -175,66 +194,60 @@ def find_code_block(notion, block_id, depth=0):
         cursor = page["next_cursor"]
 
 
-def write(notion, row, r):
+def write(notion, row, snippet):
     block = find_code_block(notion, row["id"])
     if not block:
         raise ValueError("No code block on the row page.")
-    parts = [{"type": "text", "text": {"content": r["code"][i : i + 2000]}} for i in range(0, max(len(r["code"]), 1), 2000)]
-    caption = [
-        {"type": "text", "text": {"content": r["anchor"], "link": {"url": r["permalink"]}}},
-        {"type": "text", "text": {"content": f" @ {r['commit'][:7]}"}},
-    ]
-    notion("PATCH", f"/blocks/{block}", {"code": {"rich_text": parts, "language": r["language"], "caption": caption}})
+    code = snippet["code"]
+    parts = [{"type": "text", "text": {"content": code[i : i + CHUNK]}} for i in range(0, max(len(code), 1), CHUNK)]
+    caption = rich(snippet["anchor"], snippet["permalink"])["rich_text"] + rich(f" @ {snippet['commit'][:7]}")["rich_text"]
+    notion("PATCH", f"/blocks/{block}", {"code": {"rich_text": parts, "language": snippet["language"], "caption": caption}})
     properties = {
-        "Region": rich(r["region"], r["permalink"]),
-        "Hash": rich(r["hash"]),
+        "Region": rich(snippet["region"], snippet["permalink"]),
+        "Hash": rich(snippet["hash"]),
         "Status": {"select": {"name": "In sync"}},
         "Message": rich(""),
     }
-    if r["moved"]:
-        properties.update({"Start line": {"number": r["start"]}, "End line": {"number": r["end"]}})
+    if snippet["moved"]:
+        properties.update({"Start line": {"number": snippet["start"]}, "End line": {"number": snippet["end"]}})
     notion("PATCH", f"/pages/{row['id']}", {"properties": properties})
 
 
 def sync(notion, rows, repo, head, mode):
     results = []
     for row in rows:
-        source = row["method"] or (f"L{row['start']}-L{row['end'] or 'end'}" if row["start"] else "file")
-        report = lambda result, note: results.append((row["name"], source, result, note))
+        target = row["method"] or (f"L{row['start']}-L{row['end'] or 'end'}" if row["start"] else "file")
+        report = lambda result, note: results.append((row["name"], target, result, note))
         if not row["file"]:
             report("skipped", "File is empty")
             continue
-        other = FILE.match(row["file"])
-        if other and other[1].lower() != repo.lower():
-            report("skipped", f"File is in {other[1]}")
+        if row["repo"] and row["repo"].lower() != repo.lower():
+            report("skipped", f"File is in {row['repo']}")
             continue
         try:
-            r = resolve(row, head)
-        except (ValueError, OSError, subprocess.CalledProcessError) as e:
-            error = str(e)
+            snippet = resolve(row, head)
+            note = f"{snippet['anchor']} ({snippet['moved']})" if snippet["moved"] else snippet["anchor"]
+            if mode != "force" and snippet["hash"] == row["hash"] and row["status"] == "In sync" and not snippet["moved"]:
+                report("unchanged", note)
+            elif mode == "plan":
+                report("will update" if row["hash"] else "new", note)
+            else:
+                write(notion, row, snippet)
+                report("updated" if row["hash"] else "new", note)
+        except (ValueError, RuntimeError) as e:
+            error = str(e)[:2000]
             known = row["status"] == "Error" and row["message"] == error
             if mode != "plan" and not known:
-                notion("PATCH", f"/pages/{row['id']}", {"properties": {"Status": {"select": {"name": "Error"}}, "Message": rich(error)}})
+                try:
+                    notion("PATCH", f"/pages/{row['id']}", {"properties": {"Status": {"select": {"name": "Error"}}, "Message": rich(error)}})
+                except RuntimeError as status_error:
+                    error += f" Status not written: {status_error}"
             report("error (known)" if known else "error", error)
-            continue
-        note = f"{r['anchor']} ({r['moved']})" if r["moved"] else r["anchor"]
-        if mode != "force" and r["hash"] == row["hash"] and row["status"] == "In sync" and not r["moved"]:
-            report("unchanged", note)
-        elif mode == "plan":
-            report("will update" if row["hash"] else "new", note)
-        else:
-            try:
-                write(notion, row, r)
-                report("updated" if row["hash"] else "new", note)
-            except (ValueError, RuntimeError) as e:
-                report("error", str(e))
     return results
 
 
 def current_repo():
-    if os.environ.get("GITHUB_REPOSITORY"):
-        return os.environ["GITHUB_REPOSITORY"]
-    return re.search(r"github\.com[:/](.+?)(?:\.git)?$", git("remote", "get-url", "origin").strip())[1]
+    return os.environ.get("GITHUB_REPOSITORY") or re.search(r"github\.com[:/](.+?)(?:\.git)?$", git("remote", "get-url", "origin").strip())[1]
 
 
 def main():
@@ -248,24 +261,21 @@ def main():
     notion = Notion(token)
     head = os.environ.get("GITHUB_SHA") or git("rev-parse", "HEAD").strip()
     results = sync(notion, read_rows(notion, args.database), current_repo(), head, args.mode)
-
-    counts = {}
-    for _, _, result, _ in results:
-        counts[result] = counts.get(result, 0) + 1
+    counts = collections.Counter(result for _, _, result, _ in results)
     summary = "\n".join([
         f"### Notion snippets: {args.mode} at `{head[:7]}`",
         "",
         ", ".join(f"{v} {k}" for k, v in counts.items()) + f", {notion.calls} Notion API calls",
         "",
-        "| Snippet | Source | Result | Region or error |",
+        "| Snippet | Target | Result | Region or error |",
         "|---|---|---|---|",
-        *(f"| {name} | `{source}` | {result} | {note.replace('|', '\\|')} |" for name, source, result, note in results),
+        *(f"| {name} | `{target}` | {result} | {note.replace('|', '\\|')} |" for name, target, result, note in results),
     ])
     print(summary)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write(summary + "\n")
-    return 1 if any(result == "error" for _, _, result, _ in results) else 0
+    return 1 if counts["error"] else 0
 
 
 if __name__ == "__main__":
